@@ -1,4 +1,11 @@
 # Byte-compiled / optimized / DLL files
+node_modules/
+.vite/
+*.tsbuildinfo
+.env.*
+!.env.example
+!.env.*.example
+
 __pycache__/
 *.py[codz]
 *$py.class
