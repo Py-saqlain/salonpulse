@@ -1,15 +1,16 @@
+import type { Staff } from './staff';
 import { CustomerEditor } from './CustomerEditor';
 import type { SaveCustomer } from './CustomerEditor';
 import type { Customer } from './customers';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { X, CalendarPlus } from 'lucide-react';
-import { staffMembers, services, formatPKR, lahoreDate, validateBooking } from './data';
+import { services, formatPKR, lahoreDate, validateBooking } from './data';
 import type { Appointment, BookingInput } from './data';
 
-export function AppointmentForm({ appointments, onSave, onClose, editing, customers, onSaveCustomer }: { appointments: Appointment[]; customers: Customer[]; onSaveCustomer: SaveCustomer; editing?: Appointment; onSave: (input: BookingInput) => string | null; onClose: () => void }) {
+export function AppointmentForm({ appointments, onSave, onClose, editing, customers, onSaveCustomer, staff }: { appointments: Appointment[]; staff: Staff[]; customers: Customer[]; onSaveCustomer: SaveCustomer; editing?: Appointment; onSave: (input: BookingInput) => string | null; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [input, setInput] = useState<BookingInput>(editing ?? { bookingType: 'Scheduled', customerId: '', service: '', staff: '', date: lahoreDate(), time: '' });
+  const [input, setInput] = useState<BookingInput>(editing ?? { bookingType: 'Scheduled', customerId: '', service: '', staffId: '', date: lahoreDate(), time: '' });
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [error, setError] = useState('');
   const errorRef = useRef<HTMLParagraphElement>(null);
@@ -33,7 +34,7 @@ export function AppointmentForm({ appointments, onSave, onClose, editing, custom
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    const message = validateBooking(input, appointments, Date.now(), editing?.id, customers) ?? onSave(input);
+    const message = validateBooking(input, appointments, Date.now(), editing?.id, customers, staff) ?? onSave(input);
     if (message) { setError(message); requestAnimationFrame(() => errorRef.current?.focus()); }
   }
   return <dialog ref={dialog} className="booking-dialog" aria-labelledby="booking-title" aria-describedby="booking-description" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -45,7 +46,7 @@ export function AppointmentForm({ appointments, onSave, onClose, editing, custom
         <label>Customer<select required autoFocus value={input.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Select a customer</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` (${customer.phone})` : ''}</option>)}</select></label><button type="button" className="quick-customer" onClick={() => setAddingCustomer(true)}>+ Add customer</button>
         <label>Service<select required value={input.service} onChange={e => update('service', e.target.value)}><option value="">Select a service</option>{services.map(s => <option key={s.name}>{s.name}</option>)}</select></label>
         <div className="booking-service" aria-live="polite">{service ? <><span>{service.minutes} minutes</span><strong>{formatPKR(service.price)}</strong></> : <span>Select a service to see duration and price.</span>}</div>
-        <label>Staff member<select required value={input.staff} onChange={e => update('staff', e.target.value)}><option value="">Select a staff member</option>{staffMembers.map(name => <option key={name}>{name}</option>)}</select></label>
+        <label>Staff member<select required value={input.staffId} onChange={e => update('staffId', e.target.value)}><option value="">Select a staff member</option>{staff.filter(member => member.active || member.id === editing?.staffId).map(member => <option key={member.id} value={member.id} disabled={!member.active}>{member.name}{!member.active ? ' (inactive - reassign to save)' : member.hours === null ? ' (hours not configured)' : ''}</option>)}</select></label><p className="field-help">Only active employees can receive new bookings. Working hours must be configured on Staff. Edits are checked against current availability; existing assignments remain until saved.</p>
         <div className="booking-date-time"><label>Appointment date<input type="date" required min={lahoreDate()} value={input.date} onChange={e => update('date', e.target.value)} /></label><label>Start time (PKT)<input type="time" required value={input.time} onChange={e => update('time', e.target.value)} /></label></div>
       </div>
       {error && <p role="alert" tabIndex={-1} ref={errorRef} className="booking-error">{error}</p>}

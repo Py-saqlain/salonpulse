@@ -1,0 +1,24 @@
+.staff-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.staff-card-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.staff-card-heading .status { margin:0; }
+.staff-filters { display:grid; grid-template-columns:2fr 1fr; gap:18px; }
+.staff-filters .customer-search { max-width:none; }
+.staff-filters select { font:inherit; color:#22382f; background:#fff; border:1px solid #b9cbbf; border-radius:8px; padding:12px; min-height:46px; }
+.staff-hours { font-size:14px; line-height:1.7; margin-bottom:18px; }
+.staff-hours p { color:#617368; }
+.staff-checkbox { display:flex!important; align-items:center; flex-direction:row; gap:10px!important; }
+.staff-checkbox input { width:18px!important; min-height:18px!important; accent-color:#1b503b; flex-shrink:0; }
+.working-hours { border:1px solid #dbe5dc; border-radius:8px; padding:16px; display:grid; gap:14px; }
+.working-hours legend { font-size:16px; font-weight:600; padding:0 6px; }
+.shift-row { display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:10px; align-items:center; }
+.shift-row input[type=time] { padding:8px; }
+.working-hours .field-help,.staff-editor .field-help { margin:0; }
+.staff-filters select:focus-visible { outline:3px solid #c08032; outline-offset:2px; }
+@media(max-width:900px) { .staff-grid { grid-template-columns:1fr; } }
+@media(max-width:480px) {
+ .staff-filters { grid-template-columns:1fr; gap:0; }
+ .staff-filters .customer-search { margin:12px 0; }
+ .shift-row { grid-template-columns:1fr 1fr; }
+ .shift-row>.staff-checkbox { grid-column:1/-1; }
+ .working-hours { padding:12px; }
+}

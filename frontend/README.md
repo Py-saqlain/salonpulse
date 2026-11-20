@@ -2,7 +2,7 @@
 
 A responsive salon-owner workspace with a desktop sidebar and mobile drawer.
 All data is fictional. Bookings persist in this browser's localStorage under
-`salonpulse.demo.v2`; there are no API calls or backend persistence.
+`salonpulse.demo.v3`; there are no API calls or backend persistence.
 The dashboard uses the current date and time in Lahore (PKT, UTC+05:00).
 On first use, five sample appointments are created for the current Lahore date.
 
@@ -19,6 +19,44 @@ Open http://localhost:5173. Stop with Ctrl+C.
 ```powershell
 npm.cmd run build
 ```
+
+## Staff management
+
+Staff has a shared directory with stable employee IDs, name, optional Pakistani
+mobile, optional specialty, active status, and weekly working hours. Phone
+normalization matches Customers, with duplicates checked within the staff
+directory. Today's counts come from assigned appointments and exclude cancelled
+bookings. Search covers names, phone numbers and specialties; filter by active
+or inactive status. There is no deletion.
+
+Working hours use Lahore time (Asia/Karachi, UTC+05:00), with one same-day shift
+per working day. End must be after start. Days not selected are days off. New
+employees default to hours not configured, which explicitly blocks new bookings.
+The seeded demo team has clearly labeled sample hours of 09:00-20:00 daily.
+Overnight shifts, breaks, holidays, and time off are not implemented yet.
+
+New and edited appointments require an active employee with configured hours;
+the entire service must fit that day's shift. Overlaps use staff IDs and exclude
+cancelled bookings and the booking being edited. Existing bookings assigned to
+an inactive employee remain visible; editing requires choosing an active employee.
+Completed and cancelled history remains read-only, as before.
+
+Deactivation with unfinished future or ongoing appointments requires explicit
+browser confirmation. It never cancels or reassigns them. Changes to hours also
+leave existing appointments intact; review those bookings manually. No automatic
+rescheduling is performed.
+
+`staff.ts` owns employee types, validation, availability and pending-booking
+queries. `StaffPage.tsx` and `staff.css` provide the responsive directory/editor.
+Appointments use `staffId` and retain a name snapshot. Renaming staff keeps all
+bookings linked. Current names display from the shared directory.
+
+The store now uses `salonpulse.demo.v3`. Existing v2 customer data and v1
+appointment data migrate automatically while retaining their original keys.
+Known employee names map to seed IDs; unknown legacy names are retained as
+inactive employees with unconfigured hours. Migration does not reject existing
+bookings for hours or activity conflicts. A failed migration write preserves
+loaded bookings in memory and displays a warning.
 
 The build runs TypeScript checking before Vite. If dependency installation has
 not completed, the build cannot run; finish `npm.cmd install` first.
@@ -84,7 +122,7 @@ New appointment includes Add customer, using the same form and store. Saving a
 new customer selects them automatically and preserves the rest of the booking.
 Cancelling the booking does not remove an already saved customer.
 
-Customers and bookings are written together to `salonpulse.demo.v2`. Existing
+Customers, staff and bookings are written together to `salonpulse.demo.v3`. Existing
 Day 2 `salonpulse.appointments.v1` bookings migrate to customer IDs on load; the
 old key is retained. Failed migration or storage writes show a warning. Data
 remains browser-local and is removed by clearing site storage.
