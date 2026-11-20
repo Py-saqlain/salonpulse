@@ -1,10 +1,13 @@
+import { CustomersPage } from './CustomersPage';
+import { createCustomer, normalizePhone, validateCustomer } from './customers';
+import type { CustomerInput } from './customers';
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LayoutDashboard, CalendarDays, Users, UserRound, Scissors, ChartNoAxesCombined, Plus, Clock3, Menu, X, Sparkles, Banknote, CalendarCheck, MapPin, ChevronRight, Leaf } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { customers, staffMembers, formatPKR, formatTime, lahoreDate, startsAt, loadAppointments, makeAppointment, validateBooking, STORAGE_KEY } from './data';
+import { staffMembers, formatPKR, formatTime, lahoreDate, startsAt, loadStore, makeAppointment, validateBooking, STORAGE_KEY } from './data';
 import { AppointmentForm } from './AppointmentForm';
-import type { Page, Appointment, BookingInput } from './data';
+import type { Page, Appointment, BookingInput, DemoStore } from './data';
 import './styles.css';
 
 const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
@@ -37,8 +40,13 @@ function KpiCard({ label, value, detail, icon }: { label: string; value: string;
   return <article className="kpi"><div className="flex items-center justify-between gap-3"><p>{label}</p><span className="kpi-icon"><Icon icon={icon} /></span></div><strong className="kpi-value">{value}</strong><span className="kpi-detail">{detail}</span></article>;
 }
 function App() {
-  const [initial] = useState(loadAppointments);
-  const [appointments, setAppointments] = useState(initial.items);
+  const [initial] = useState(loadStore);
+  const [store, setStore] = useState(initial.store);
+  const customers = store.customers;
+  const appointments = store.appointments.map(item => {
+    const customer = customers.find(customer => customer.id === item.customerId)!;
+    return { ...item, customer: customer.name, initials: customer.name.split(' ').map(part => part[0]).join('') };
+  });
   const [storageWarning, setStorageWarning] = useState(initial.warning);
   const [editing, setEditing] = useState<Appointment | undefined>();
   const [search, setSearch] = useState('');
@@ -56,16 +64,26 @@ function App() {
   const upcoming = sorted.filter(item => startsAt(item) >= now && item.status !== 'Completed' && item.status !== 'Cancelled').length;
   const remainingToday = todaysAppointments.filter(item => startsAt(item) >= now && item.status !== 'Completed' && item.status !== 'Cancelled').length;
   const revenue = todaysAppointments.filter(item => item.status === 'Completed').reduce((sum, item) => sum + item.price, 0);
-  function persist(next: Appointment[]): string | null {
+  function persistStore(next: DemoStore): string | null {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); }
     catch { return 'Browser storage is unavailable or full. Nothing was saved. Enable site storage or free some space and try again.'; }
-    setAppointments(next); setStorageWarning(''); setNow(Date.now()); setNotice(true);
+    setStore(next); setStorageWarning(''); setNow(Date.now()); setNotice(true);
     return null;
   }
-  function saveBooking(input: BookingInput): string | null {
-    const error = validateBooking(input, appointments, Date.now(), editing?.id);
+  function persist(next: Appointment[]): string | null { return persistStore({ ...store, appointments: next }); }
+  function saveCustomer(input: CustomerInput, id?: string) {
+    if (id && !customers.some(customer => customer.id === id)) return 'This customer no longer exists.';
+    const error = validateCustomer(input, customers, id);
     if (error) return error;
-    const booking = makeAppointment(input);
+    const customer = id ? { id, name: input.name.trim(), phone: normalizePhone(input.phone)!, notes: input.notes.trim() } : createCustomer(input, customers);
+    const next = id ? customers.map(item => item.id === id ? customer : item) : [...customers, customer];
+    const storageError = persistStore({ ...store, customers: next });
+    return storageError ?? customer;
+  }
+  function saveBooking(input: BookingInput): string | null {
+    const error = validateBooking(input, appointments, Date.now(), editing?.id, customers);
+    if (error) return error;
+    const booking = makeAppointment(input, customers);
     const next = editing ? appointments.map(item => item.id === editing.id ? { ...booking, id: item.id, status: item.status } : item) : [...appointments, booking];
     const storageError = persist(next);
     if (storageError) return storageError;
@@ -114,8 +132,8 @@ function App() {
       <header className="topbar"><div className="flex items-center gap-3"><button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon icon={menuOpen ? X : Menu} /></button><span className="breadcrumb">Workspace <ChevronRight size={14} aria-hidden="true" /> <strong>{active.label}</strong></span></div><span className="preview-badge"><span /> Demo workspace</span></header>
       <main id="main-content" tabIndex={-1}>
         <div className="page-heading"><div><p className="eyebrow">YOUR SALON AT A GLANCE</p><h1>{page === 'dashboard' ? 'A good day starts here.' : active.label}</h1><p className="page-description">{page === 'dashboard' ? 'Welcome back, Ahmed. Your salon today.' : 'A little more clarity for your everyday workflow.'}</p></div><button className="primary-button" onClick={() => { setEditing(undefined); setFormOpen(true); }}><Icon icon={Plus} size={18} /> New appointment</button></div>
-        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Mock data preview.</strong> Fictional bookings saved only in this browser, never to a backend.</span></div>
-        {notice && <div role="status" className="action-notice"><span>Appointment changes saved to this browser. Local demo data only.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
+        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Mock data preview.</strong> Demo customers and bookings saved only in this browser, never to a backend.</span></div>
+        {notice && <div role="status" className="action-notice"><span>Demo changes saved to this browser. Local demo data only.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
         {storageWarning && <p className="action-notice" role="alert">{storageWarning}</p>}
         {page === 'dashboard' ? <>
           <div className="section-date"><span><Icon icon={CalendarDays} size={17} /> {new Intl.DateTimeFormat('en-PK', { timeZone: 'Asia/Karachi', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now)}</span><span>Today | Lahore (PKT, UTC+05:00)</span></div>
@@ -126,11 +144,11 @@ function App() {
             <KpiCard label="Upcoming appointments" value={String(upcoming)} detail="Future demo bookings across all dates" icon={Clock3} />
           </section>
           <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} local demo appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary"><span className="avatar">AR</span><span className="avatar">SM</span><span className="avatar">BH</span><span>{staffMembers.length} team members<br /><strong>on today&#39;s demo roster</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
-        </> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
+        </> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
         <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Frontend preview | Mock data only</span></footer>
       </main>
     </div>
-    {formOpen && <AppointmentForm editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
+    {formOpen && <AppointmentForm customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

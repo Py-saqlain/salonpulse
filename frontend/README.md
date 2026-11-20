@@ -2,7 +2,7 @@
 
 A responsive salon-owner workspace with a desktop sidebar and mobile drawer.
 All data is fictional. Bookings persist in this browser's localStorage under
-`salonpulse.appointments.v1`; there are no API calls or backend persistence.
+`salonpulse.demo.v2`; there are no API calls or backend persistence.
 The dashboard uses the current date and time in Lahore (PKT, UTC+05:00).
 On first use, five sample appointments are created for the current Lahore date.
 
@@ -66,3 +66,37 @@ directory, a service and a staff member, and never bypasses overlap checks.
 Existing saved bookings without a booking type display as Scheduled. Customer
 search covers scheduled, walk-in, completed and cancelled records, preserving a
 single customer appointment history. No records are deleted by status changes.
+
+## Customer management
+
+Customers is a searchable directory with add/edit forms, optional Pakistani
+mobile numbers and notes. Accepted mobile formats include `03xx xxxxxxx`,
+`+92 3xx xxxxxxx`, `923xxxxxxxxx` and `00923xxxxxxxxx`. Numbers are stored as
+`+923xxxxxxxxx`; duplicate non-empty numbers are rejected within this demo business.
+Duplicate names and customers without phone numbers are allowed.
+
+Customer IDs link every booking to its owner. Name edits update the display
+without changing appointment history. Completed visit counts and the last
+completed date are derived from appointments. History includes all statuses.
+Customers cannot be deleted or deactivated in this version.
+
+New appointment includes Add customer, using the same form and store. Saving a
+new customer selects them automatically and preserves the rest of the booking.
+Cancelling the booking does not remove an already saved customer.
+
+Customers and bookings are written together to `salonpulse.demo.v2`. Existing
+Day 2 `salonpulse.appointments.v1` bookings migrate to customer IDs on load; the
+old key is retained. Failed migration or storage writes show a warning. Data
+remains browser-local and is removed by clearing site storage.
+
+`customers.ts` owns customer types, validation, normalization and history queries;
+`CustomerEditor.tsx` is reused by Customers and booking. `CustomersPage.tsx` owns
+directory and history presentation. `data.ts` owns versioned store loading and
+booking validation. React holds the shared store in `main.tsx`.
+
+Run the focused domain regression tests with Node.js 24:
+
+```powershell
+npm.cmd test
+npm.cmd run build
+```

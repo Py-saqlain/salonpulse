@@ -1,12 +1,16 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { CustomerEditor } from './CustomerEditor';
+import type { SaveCustomer } from './CustomerEditor';
+import type { Customer } from './customers';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { X, CalendarPlus } from 'lucide-react';
-import { customers, staffMembers, services, formatPKR, lahoreDate, validateBooking } from './data';
+import { staffMembers, services, formatPKR, lahoreDate, validateBooking } from './data';
 import type { Appointment, BookingInput } from './data';
 
-export function AppointmentForm({ appointments, onSave, onClose, editing }: { appointments: Appointment[]; editing?: Appointment; onSave: (input: BookingInput) => string | null; onClose: () => void }) {
+export function AppointmentForm({ appointments, onSave, onClose, editing, customers, onSaveCustomer }: { appointments: Appointment[]; customers: Customer[]; onSaveCustomer: SaveCustomer; editing?: Appointment; onSave: (input: BookingInput) => string | null; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [input, setInput] = useState<BookingInput>(editing ?? { bookingType: 'Scheduled', customer: '', service: '', staff: '', date: lahoreDate(), time: '' });
+  const [input, setInput] = useState<BookingInput>(editing ?? { bookingType: 'Scheduled', customerId: '', service: '', staff: '', date: lahoreDate(), time: '' });
+  const [addingCustomer, setAddingCustomer] = useState(false);
   const [error, setError] = useState('');
   const errorRef = useRef<HTMLParagraphElement>(null);
   const service = services.find(s => s.name === input.service);
@@ -29,15 +33,16 @@ export function AppointmentForm({ appointments, onSave, onClose, editing }: { ap
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    const message = validateBooking(input, appointments, Date.now(), editing?.id) ?? onSave(input);
+    const message = validateBooking(input, appointments, Date.now(), editing?.id, customers) ?? onSave(input);
     if (message) { setError(message); requestAnimationFrame(() => errorRef.current?.focus()); }
   }
   return <dialog ref={dialog} className="booking-dialog" aria-labelledby="booking-title" aria-describedby="booking-description" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="booking-heading"><div><span className="eyebrow">LOCAL DEMO BOOKING</span><h2 id="booking-title">{editing ? 'Edit appointment' : 'New appointment'}</h2></div><button type="button" className="icon-button" aria-label="Close appointment form" onClick={onClose}><X size={20} /></button></div>
     <p id="booking-description" className="booking-description">Saved only in this browser. No backend storage. All times are Lahore time (PKT, UTC+05:00).</p>
-    <form onSubmit={submit}>
+    <div hidden={!addingCustomer}>{addingCustomer && <CustomerEditor onSave={onSaveCustomer} onDone={customer => { setAddingCustomer(false); if (customer) update('customerId', customer.id); }} />}</div>
+    <form onSubmit={submit} hidden={addingCustomer}>
       <div className="booking-fields"><fieldset className="booking-type"><legend>Appointment type</legend>{(['Scheduled', 'Walk-in'] as const).map(type => <label key={type}><input type="radio" name="bookingType" value={type} checked={(input.bookingType ?? 'Scheduled') === type} onChange={() => chooseType(type)} />{type}</label>)}</fieldset>{input.bookingType === 'Walk-in' && <p className="walkin-note">Start time is prefilled for the next minute in Lahore. Adjust it if the customer needs to wait; staff availability is checked on save.</p>}
-        <label>Customer<select required autoFocus value={input.customer} onChange={e => update('customer', e.target.value)}><option value="">Select a customer</option>{customers.map(name => <option key={name}>{name}</option>)}</select></label>
+        <label>Customer<select required autoFocus value={input.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Select a customer</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` (${customer.phone})` : ''}</option>)}</select></label><button type="button" className="quick-customer" onClick={() => setAddingCustomer(true)}>+ Add customer</button>
         <label>Service<select required value={input.service} onChange={e => update('service', e.target.value)}><option value="">Select a service</option>{services.map(s => <option key={s.name}>{s.name}</option>)}</select></label>
         <div className="booking-service" aria-live="polite">{service ? <><span>{service.minutes} minutes</span><strong>{formatPKR(service.price)}</strong></> : <span>Select a service to see duration and price.</span>}</div>
         <label>Staff member<select required value={input.staff} onChange={e => update('staff', e.target.value)}><option value="">Select a staff member</option>{staffMembers.map(name => <option key={name}>{name}</option>)}</select></label>
