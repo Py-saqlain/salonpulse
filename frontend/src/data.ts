@@ -1,19 +1,14 @@
+import { seedServices, validateService, bookingService, normalizeServiceName } from './services';
+import type { Service } from './services';
 import { seedStaff, validateStaff, availabilityError } from './staff';
 import type { Staff } from './staff';
 import { seedCustomers, normalizePhone } from './customers';
 import type { Customer } from './customers';
 export type Page = 'dashboard' | 'appointments' | 'customers' | 'staff' | 'services' | 'analytics';
-export const services = [
-  { name: 'Signature haircut & beard', minutes: 45, price: 2500 },
-  { name: 'Hair colour & styling', minutes: 90, price: 8500 },
-  { name: 'Haircut & wash', minutes: 30, price: 1800 },
-  { name: 'Facial & skin care', minutes: 60, price: 4500 },
-  { name: 'Beard trim & shaping', minutes: 30, price: 1200 },
-];
-export type Appointment = { id: string; bookingType?: 'Scheduled' | 'Walk-in'; customerId: string; customer: string; initials: string; service: string; staffId: string; staff: string; date: string; time: string; minutes: number; price: number; status: 'Confirmed' | 'In progress' | 'Completed' | 'Cancelled' };
-export type BookingInput = { bookingType?: 'Scheduled' | 'Walk-in'; customerId: string; service: string; staffId: string; date: string; time: string };
-export const STORAGE_KEY = 'salonpulse.demo.v3';
-export type DemoStore = { customers: Customer[]; staff: Staff[]; appointments: Appointment[] };
+export type Appointment = { id: string; bookingType?: 'Scheduled' | 'Walk-in'; customerId: string; customer: string; initials: string; serviceId: string; service: string; staffId: string; staff: string; date: string; time: string; minutes: number; price: number; status: 'Confirmed' | 'In progress' | 'Completed' | 'Cancelled' };
+export type BookingInput = { bookingType?: 'Scheduled' | 'Walk-in'; recalculateService?: boolean; customerId: string; serviceId: string; staffId: string; date: string; time: string };
+export const STORAGE_KEY = 'salonpulse.demo.v4';
+export type DemoStore = { customers: Customer[]; staff: Staff[]; services: Service[]; appointments: Appointment[] };
 export const formatPKR = (value: number) => `PKR ${value.toLocaleString('en-PK')}`;
 export function lahoreDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
@@ -23,12 +18,13 @@ export function lahoreDate(now = new Date()): string {
 export const startsAt = (item: { date: string; time: string }) => new Date(`${item.date}T${item.time}:00+05:00`).getTime();
 export const formatTime = (item: Appointment) => new Intl.DateTimeFormat('en-PK', { timeZone: 'Asia/Karachi', hour: 'numeric', minute: '2-digit' }).format(startsAt(item));
 export function seedAppointments(): Appointment[] {
-  return services.map((service, i) => ({ id: `seed-${i}`, customerId: seedCustomers[i].id, customer: seedCustomers[i].name, initials: seedCustomers[i].name.split(' ').map(n => n[0]).join(''), service: service.name, staffId: seedStaff[[0, 1, 2, 1, 0][i]].id, staff: seedStaff[[0, 1, 2, 1, 0][i]].name, date: lahoreDate(), time: ['10:00', '11:00', '12:30', '14:00', '15:30'][i], minutes: service.minutes, price: service.price, status: i === 0 ? 'Completed' : 'Confirmed' }));
+  return seedServices.map((service, i) => ({ id: `seed-${i}`, customerId: seedCustomers[i].id, customer: seedCustomers[i].name, initials: seedCustomers[i].name.split(' ').map(n => n[0]).join(''), serviceId: service.id, service: service.name, staffId: seedStaff[[0, 1, 2, 1, 0][i]].id, staff: seedStaff[[0, 1, 2, 1, 0][i]].name, date: lahoreDate(), time: ['10:00', '11:00', '12:30', '14:00', '15:30'][i], minutes: service.minutes, price: service.price, status: i === 0 ? 'Completed' : 'Confirmed' }));
 }
-export function validateBooking(input: BookingInput, items: Appointment[], now = Date.now(), excludeId?: string, customers: Customer[] = seedCustomers, staff: Staff[] = seedStaff): string | null {
+export function validateBooking(input: BookingInput, items: Appointment[], now = Date.now(), excludeId?: string, customers: Customer[] = seedCustomers, staff: Staff[] = seedStaff, services: Service[] = seedServices): string | null {
   if (input.bookingType !== undefined && !['Scheduled', 'Walk-in'].includes(input.bookingType)) return 'Choose a valid booking type.';
-  const service = services.find(s => s.name === input.service);
-  if (!customers.some(customer => customer.id === input.customerId) || !staff.some(member => member.id === input.staffId) || !service || !input.date || !input.time) return 'Choose a customer, service, staff member, date and start time.';
+  const service = bookingService(input, services, items.find(item => item.id === excludeId));
+  if (typeof service === 'string') return service;
+  if (!customers.some(customer => customer.id === input.customerId) || !staff.some(member => member.id === input.staffId) || !input.date || !input.time) return 'Choose a customer, service, staff member, date and start time.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time)) return 'Enter a valid date and start time.';
   const start = startsAt(input);
   if (!Number.isFinite(start) || lahoreDate(new Date(start)) !== input.date) return 'Enter a valid appointment date.';
@@ -39,17 +35,20 @@ export function validateBooking(input: BookingInput, items: Appointment[], now =
   if (items.some(item => item.id !== excludeId && item.status !== 'Cancelled' && item.staffId === input.staffId && start < startsAt(item) + item.minutes * 60000 && end > startsAt(item))) return 'This staff member already has an overlapping appointment. Choose another time or staff member.';
   return null;
 }
-export function makeAppointment(input: BookingInput, customers: Customer[] = seedCustomers, staff: Staff[] = seedStaff): Appointment {
-  const service = services.find(s => s.name === input.service)!;
+export function makeAppointment(input: BookingInput, customers: Customer[] = seedCustomers, staff: Staff[] = seedStaff, services: Service[] = seedServices, existing?: Appointment): Appointment {
+  const service = bookingService(input, services, existing);
+  if (typeof service === 'string') throw new Error(service);
   const customer = customers.find(item => item.id === input.customerId)!;
-  return { ...input, staff: staff.find(member => member.id === input.staffId)!.name, customer: customer.name, id: crypto.randomUUID(), initials: customer.name.split(' ').map(n => n[0]).join(''), minutes: service.minutes, price: service.price, status: 'Confirmed' };
+  const { recalculateService: _recalculate, ...fields } = input;
+  return { ...fields, service: service.name, staff: staff.find(member => member.id === input.staffId)!.name, customer: customer.name, id: crypto.randomUUID(), initials: customer.name.split(' ').map(n => n[0]).join(''), minutes: service.minutes, price: service.price, status: 'Confirmed' };
 }
 export function loadStore(): { store: DemoStore; warning: string } {
-  const fallback = { staff: seedStaff.map(item => ({ ...item, hours: item.hours?.map(day => ({ ...day })) ?? null })), customers: seedCustomers.map(item => ({ ...item })), appointments: seedAppointments() };
+  const fallback = { services: seedServices.map(item => ({ ...item })), staff: seedStaff.map(item => ({ ...item, hours: item.hours?.map(day => ({ ...day })) ?? null })), customers: seedCustomers.map(item => ({ ...item })), appointments: seedAppointments() };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     let store: DemoStore;
-    const previous = raw === null ? localStorage.getItem('salonpulse.demo.v2') : null;
+    const v3 = raw === null ? localStorage.getItem('salonpulse.demo.v3') : null;
+    const previous = raw === null ? v3 ?? localStorage.getItem('salonpulse.demo.v2') : null;
     if (raw !== null) store = JSON.parse(raw);
     else if (previous !== null) store = JSON.parse(previous);
     else {
@@ -64,10 +63,10 @@ export function loadStore(): { store: DemoStore; warning: string } {
         if (!customer) { customer = { id: crypto.randomUUID(), name: item.customer, phone: '', notes: '' }; customers.push(customer); }
         return { ...item, customerId: customer.id };
       });
-      store = { customers, staff: fallback.staff, appointments };
+      store = { customers, staff: fallback.staff, services: fallback.services, appointments };
     }
     if (!store || !Array.isArray(store.customers) || !Array.isArray(store.appointments)) throw new Error('Invalid store');
-    if (raw === null) {
+    if (raw === null && v3 === null) {
       store.staff = fallback.staff;
       for (const item of store.appointments) {
         if (!item || typeof item.staff !== 'string' || !item.staff.trim()) throw new Error('Invalid staff reference');
@@ -75,6 +74,21 @@ export function loadStore(): { store: DemoStore; warning: string } {
         if (!member) { member = { id: crypto.randomUUID(), name: item.staff, phone: '', specialty: '', active: false, hours: null }; store.staff.push(member); }
         item.staffId = member.id;
       }
+    }
+    if (raw === null) {
+      store.services = fallback.services;
+      for (const item of store.appointments) {
+        if (!item || typeof item.service !== 'string' || !item.service.trim() || !Number.isSafeInteger(item.minutes) || item.minutes <= 0 || !Number.isFinite(item.price) || item.price < 0) throw new Error('Invalid service snapshot');
+        let service = store.services.find(service => normalizeServiceName(service.name) === normalizeServiceName(item.service));
+        if (!service) { service = { id: crypto.randomUUID(), name: item.service, minutes: item.minutes, price: item.price, category: 'Legacy', description: 'Retained from an earlier booking', active: false }; store.services.push(service); }
+        item.serviceId = service.id;
+      }
+    }
+    if (!Array.isArray(store.services)) throw new Error('Invalid services');
+    const serviceIds = new Set<string>();
+    for (const service of store.services) {
+      if (!service || typeof service.id !== 'string' || !service.id || serviceIds.has(service.id) || typeof service.name !== 'string' || typeof service.category !== 'string' || typeof service.description !== 'string' || validateService(service, store.services, service.id)) throw new Error('Invalid service');
+      serviceIds.add(service.id);
     }
     if (!Array.isArray(store.staff)) throw new Error('Invalid staff directory');
     const staffIds = new Set<string>();
@@ -89,7 +103,7 @@ export function loadStore(): { store: DemoStore; warning: string } {
     }
     const appointmentIds = new Set<string>();
     for (const item of store.appointments) {
-      if (!item || typeof item.id !== 'string' || appointmentIds.has(item.id) || !ids.has(item.customerId) || !staffIds.has(item.staffId) || !services.some(s => s.name === item.service && s.minutes === item.minutes && s.price === item.price) || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time) || !Number.isFinite(startsAt(item)) || lahoreDate(new Date(startsAt(item))) !== item.date || !['Confirmed', 'Completed', 'In progress', 'Cancelled'].includes(item.status)) throw new Error('Invalid appointment');
+      if (!item || typeof item.id !== 'string' || appointmentIds.has(item.id) || !ids.has(item.customerId) || !staffIds.has(item.staffId) || !serviceIds.has(item.serviceId) || typeof item.service !== 'string' || !item.service.trim() || !Number.isSafeInteger(item.minutes) || item.minutes <= 0 || !Number.isFinite(item.price) || item.price < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time) || !Number.isFinite(startsAt(item)) || lahoreDate(new Date(startsAt(item))) !== item.date || !['Confirmed', 'Completed', 'In progress', 'Cancelled'].includes(item.status)) throw new Error('Invalid appointment');
       appointmentIds.add(item.id);
     }
     if (raw === null) {

@@ -1,3 +1,6 @@
+import { ServicesPage } from './ServicesPage';
+import { makeService, validateService, upcomingServiceBookings } from './services';
+import type { ServiceInput } from './services';
 import { StaffPage } from './StaffPage';
 import { makeStaff, validateStaff, upcomingStaffBookings } from './staff';
 import type { StaffInput } from './staff';
@@ -47,6 +50,7 @@ function App() {
   const [store, setStore] = useState(initial.store);
   const customers = store.customers;
   const staff = store.staff;
+  const services = store.services;
   const appointments = store.appointments.map(item => {
     const customer = customers.find(customer => customer.id === item.customerId)!;
     return { ...item, staff: staff.find(member => member.id === item.staffId)?.name ?? item.staff, customer: customer.name, initials: customer.name.split(' ').map(part => part[0]).join('') };
@@ -94,10 +98,20 @@ function App() {
     const member = makeStaff(input, staff, id);
     return persistStore({ ...store, staff: existing ? staff.map(item => item.id === id ? member : item) : [...staff, member] });
   }
-  function saveBooking(input: BookingInput): string | null {
-    const error = validateBooking(input, appointments, Date.now(), editing?.id, customers, staff);
+  function saveService(input: ServiceInput, id?: string): string | null {
+    const existing = services.find(service => service.id === id);
+    if (id && !existing) return 'This service no longer exists.';
+    const error = validateService(input, services, id);
     if (error) return error;
-    const booking = makeAppointment(input, customers, staff);
+    const pending = id ? upcomingServiceBookings(id, appointments) : [];
+    if (existing?.active && !input.active && pending.length && !window.confirm(`Deactivate ${existing.name}? ${pending.length} upcoming or ongoing appointments will keep their booked service, duration and price. They will not be cancelled. Continue?`)) return 'Deactivation was not saved. Bookings are unchanged.';
+    const service = makeService(input, services, id);
+    return persistStore({ ...store, services: existing ? services.map(item => item.id === id ? service : item) : [...services, service] });
+  }
+  function saveBooking(input: BookingInput): string | null {
+    const error = validateBooking(input, appointments, Date.now(), editing?.id, customers, staff, services);
+    if (error) return error;
+    const booking = makeAppointment(input, customers, staff, services, editing);
     const next = editing ? appointments.map(item => item.id === editing.id ? { ...booking, id: item.id, status: item.status } : item) : [...appointments, booking];
     const storageError = persist(next);
     if (storageError) return storageError;
@@ -146,7 +160,7 @@ function App() {
       <header className="topbar"><div className="flex items-center gap-3"><button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon icon={menuOpen ? X : Menu} /></button><span className="breadcrumb">Workspace <ChevronRight size={14} aria-hidden="true" /> <strong>{active.label}</strong></span></div><span className="preview-badge"><span /> Demo workspace</span></header>
       <main id="main-content" tabIndex={-1}>
         <div className="page-heading"><div><p className="eyebrow">YOUR SALON AT A GLANCE</p><h1>{page === 'dashboard' ? 'A good day starts here.' : active.label}</h1><p className="page-description">{page === 'dashboard' ? 'Welcome back, Ahmed. Your salon today.' : 'A little more clarity for your everyday workflow.'}</p></div><button className="primary-button" onClick={() => { setEditing(undefined); setFormOpen(true); }}><Icon icon={Plus} size={18} /> New appointment</button></div>
-        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Mock data preview.</strong> Demo staff, customers and bookings saved only in this browser, never to a backend.</span></div>
+        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Mock data preview.</strong> Demo services, staff, customers and bookings saved only in this browser, never to a backend.</span></div>
         {notice && <div role="status" className="action-notice"><span>Demo changes saved to this browser. Local demo data only.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
         {storageWarning && <p className="action-notice" role="alert">{storageWarning}</p>}
         {page === 'dashboard' ? <>
@@ -158,11 +172,11 @@ function App() {
             <KpiCard label="Upcoming appointments" value={String(upcoming)} detail="Future demo bookings across all dates" icon={Clock3} />
           </section>
           <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} local demo appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary"><span className="avatar">AR</span><span className="avatar">SM</span><span className="avatar">BH</span><span>{staff.filter(member => member.active).length} team members<br /><strong>active in the demo directory</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
-        </> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={saveStaff} now={now} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
+        </> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={saveStaff} now={now} /> : page === 'services' ? <ServicesPage services={services} appointments={appointments} onSave={saveService} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
         <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Frontend preview | Mock data only</span></footer>
       </main>
     </div>
-    {formOpen && <AppointmentForm staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
+    {formOpen && <AppointmentForm services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

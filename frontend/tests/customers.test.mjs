@@ -7,15 +7,16 @@ import { pathToFileURL } from 'node:url';
 import { stripTypeScriptTypes } from 'node:module';
 // Strip types using Node 24; no additional test packages are required.
 const directory = mkdtempSync(join(tmpdir(), 'salonpulse-tests-'));
-let data, customers, staffDomain;
+let data, customers, staffDomain, serviceDomain;
 try {
-  for (const name of ['customers', 'staff', 'data']) {
+  for (const name of ['customers', 'staff', 'services', 'data']) {
     const source = readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
-    const output = stripTypeScriptTypes(source).replaceAll("'./customers'", "'./customers.mjs'").replaceAll("'./staff'", "'./staff.mjs'");
+    const output = stripTypeScriptTypes(source).replaceAll("'./customers'", "'./customers.mjs'").replaceAll("'./staff'", "'./staff.mjs'").replaceAll("'./services'", "'./services.mjs'");
     writeFileSync(join(directory, `${name}.mjs`), output);
   }
   customers = await import(pathToFileURL(join(directory, 'customers.mjs')));
   staffDomain = await import(pathToFileURL(join(directory, 'staff.mjs')));
+  serviceDomain = await import(pathToFileURL(join(directory, 'services.mjs')));
   data = await import(pathToFileURL(join(directory, 'data.mjs')));
 } finally { rmSync(directory, { recursive: true, force: true }); }
 const { normalizePhone, validateCustomer, createCustomer, customerHistory, seedCustomers } = customers;
@@ -26,7 +27,7 @@ function storage(entries = {}) {
   return map;
 }
 const input = { name: '  New Customer  ', phone: '0300 1234567', notes: '  Prefers afternoon  ' };
-const booking = { customerId: 'customer-0', service: 'Signature haircut & beard', staffId: 'staff-0', date: '2027-01-02', time: '10:00' };
+const booking = { customerId: 'customer-0', serviceId: 'service-0', staffId: 'staff-0', date: '2027-01-02', time: '10:00' };
 const now = Date.parse('2027-01-01T00:00:00Z');
 test('normalizes national and international Pakistani mobiles', () => {
   for (const number of ['03001234567', '0300 123-4567', '+92 (300) 1234567', '923001234567', '00923001234567']) assert.equal(normalizePhone(number), '+923001234567');
@@ -85,7 +86,7 @@ test('migrates legacy bookings to IDs without losing history and persists stable
 });
 test('round-trips customer edits and completed/cancelled history in one store', () => {
   const item = makeAppointment(booking);
-  const store = { staff: staffDomain.seedStaff, customers: seedCustomers.map(c => c.id === item.customerId ? { ...c, name: 'Renamed' } : c), appointments: [{ ...item, status: 'Cancelled' }] };
+  const store = { services: serviceDomain.seedServices, staff: staffDomain.seedStaff, customers: seedCustomers.map(c => c.id === item.customerId ? { ...c, name: 'Renamed' } : c), appointments: [{ ...item, status: 'Cancelled' }] };
   storage({ [STORAGE_KEY]: JSON.stringify(store) });
   assert.deepEqual(loadStore().store, store);
 });
@@ -166,9 +167,109 @@ test('migration write failure preserves loaded bookings in memory and old storag
 test('v3 preserves inactive staff, configured hours, and original booking references', () => {
   const item = makeAppointment(booking);
   const member = { ...seedStaff[0], name: 'Updated name', active: false, hours: null };
-  const store = { customers: seedCustomers, staff: [member, ...seedStaff.slice(1)], appointments: [item] };
+  const store = { services: serviceDomain.seedServices, customers: seedCustomers, staff: [member, ...seedStaff.slice(1)], appointments: [item] };
   storage({ [STORAGE_KEY]: JSON.stringify(store) });
   const result = loadStore();
   assert.equal(result.warning, ''); assert.deepEqual(result.store, store);
   assert.equal(result.store.appointments[0].staff, 'Ali Raza');
+});
+const { seedServices, validateService, makeService, bookingService, upcomingServiceBookings } = serviceDomain;
+const serviceInput = { name: '  Luxury facial  ', category: ' Skin care ', description: ' Gentle treatment ', minutes: 60, price: 0, active: true };
+test('service creation trims optional fields and assigns stable IDs', () => {
+  const service = makeService(serviceInput, []);
+  assert.ok(service.id); assert.equal(service.name, 'Luxury facial'); assert.equal(service.category, 'Skin care'); assert.equal(service.price, 0);
+  assert.equal(makeService({ ...serviceInput, name: 'New name' }, [service], service.id).id, service.id);
+});
+test('service validation rejects missing names and invalid numbers', () => {
+  assert.ok(validateService({ ...serviceInput, name: ' ' }, []));
+  for (const minutes of [0, -1, NaN, Infinity, 1.5, 1441]) assert.ok(validateService({ ...serviceInput, minutes }, []));
+  for (const price of [-1, NaN, Infinity, 1.001, 10000001]) assert.ok(validateService({ ...serviceInput, price }, []));
+  assert.equal(validateService({ ...serviceInput, price: 1250.25 }, []), null);
+});
+test('active names are unique ignoring case and whitespace, including reactivation', () => {
+  const existing = makeService(serviceInput, []);
+  assert.ok(validateService({ ...serviceInput, name: 'luxury   FACIAL' }, [existing]));
+  assert.equal(validateService(serviceInput, [existing], existing.id), null);
+  assert.equal(validateService({ ...serviceInput, active: false }, [existing]), null);
+  assert.equal(validateService(serviceInput, [{ ...existing, active: false }]), null);
+});
+test('new bookings reject inactive service, but original edit can keep booked terms', () => {
+  const existing = makeAppointment(booking);
+  const catalog = seedServices.map(service => ({ ...service, active: false }));
+  assert.match(validateBooking(booking, [], now, undefined, seedCustomers, seedStaff, catalog), /inactive/);
+  assert.equal(validateBooking(booking, [existing], now, existing.id, seedCustomers, seedStaff, catalog), null);
+  assert.match(validateBooking({ ...booking, recalculateService: true }, [existing], now, existing.id, seedCustomers, seedStaff, catalog), /inactive/);
+});
+test('catalog edits do not alter existing price, duration or service name snapshots', () => {
+  const existing = makeAppointment(booking);
+  const catalog = seedServices.map(service => service.id === existing.serviceId ? { ...service, name: 'Renamed service', minutes: 90, price: 9999 } : service);
+  const edited = makeAppointment(booking, seedCustomers, seedStaff, catalog, existing);
+  assert.equal(edited.minutes, 45); assert.equal(edited.price, 2500); assert.equal(edited.service, existing.service);
+  const fresh = makeAppointment(booking, seedCustomers, seedStaff, catalog);
+  assert.equal(fresh.minutes, 90); assert.equal(fresh.price, 9999); assert.equal(fresh.service, 'Renamed service');
+  assert.equal(existing.price, 2500);
+});
+test('explicit recalculation applies current terms and changing services requires confirmation', () => {
+  const existing = makeAppointment(booking);
+  const catalog = seedServices.map(service => service.id === booking.serviceId ? { ...service, minutes: 60, price: 5000 } : service);
+  const recalculated = makeAppointment({ ...booking, recalculateService: true }, seedCustomers, seedStaff, catalog, existing);
+  assert.equal(recalculated.minutes, 60); assert.equal(recalculated.price, 5000);
+  assert.equal('recalculateService' in recalculated, false);
+  assert.match(bookingService({ ...booking, serviceId: 'service-1' }, catalog, existing), /Confirm/);
+  const changed = makeAppointment({ ...booking, serviceId: 'service-1', recalculateService: true }, seedCustomers, seedStaff, catalog, existing);
+  assert.equal(changed.minutes, 90); assert.equal(changed.serviceId, 'service-1');
+});
+test('current service duration controls shift boundary for new bookings', () => {
+  const catalog = seedServices.map(service => ({ ...service, minutes: 90 }));
+  const exact = { ...booking, time: '18:30' };
+  assert.equal(validateBooking(exact, [], now, undefined, seedCustomers, seedStaff, catalog), null);
+  assert.match(validateBooking({ ...exact, time: '18:31' }, [], now, undefined, seedCustomers, seedStaff, catalog), /entire service/);
+});
+test('edit validation uses original duration until recalculation and checks new conflicts', () => {
+  const existing = makeAppointment(booking);
+  const neighbor = { ...makeAppointment({ ...booking, time: '11:00' }), id: 'neighbor' };
+  const catalog = seedServices.map(service => service.id === booking.serviceId ? { ...service, minutes: 90 } : service);
+  assert.equal(validateBooking(booking, [existing, neighbor], now, existing.id, seedCustomers, seedStaff, catalog), null);
+  assert.match(validateBooking({ ...booking, recalculateService: true }, [existing, neighbor], now, existing.id, seedCustomers, seedStaff, catalog), /overlapping/);
+  assert.equal(validateBooking({ ...booking, recalculateService: true }, [existing, { ...neighbor, status: 'Cancelled' }], now, existing.id, seedCustomers, seedStaff, catalog), null);
+});
+test('existing appointments block using their booked duration after catalog is shortened', () => {
+  const existing = { ...makeAppointment(booking), minutes: 120 };
+  const catalog = seedServices.map(service => ({ ...service, minutes: 15 }));
+  assert.match(validateBooking({ ...booking, time: '11:30' }, [existing], now, undefined, seedCustomers, seedStaff, catalog), /overlapping/);
+  assert.equal(validateBooking({ ...booking, time: '12:00' }, [existing], now, undefined, seedCustomers, seedStaff, catalog), null);
+});
+test('service deactivation warning detects upcoming and ongoing bookings only', () => {
+  const existing = makeAppointment(booking);
+  const rows = [existing, { ...existing, id: 'done', status: 'Completed' }, { ...existing, id: 'cancel', status: 'Cancelled' }];
+  assert.equal(upcomingServiceBookings(existing.serviceId, rows, now).length, 1);
+  assert.equal(upcomingServiceBookings(existing.serviceId, rows, Date.parse('2027-01-02T10:30:00+05:00')).length, 1);
+  assert.equal(upcomingServiceBookings(existing.serviceId, rows, Date.parse('2027-01-03T10:30:00+05:00')).length, 0);
+});
+test('v3 migration preserves custom price/duration and customer/staff identities', () => {
+  const existing = { ...makeAppointment(booking), price: 3200, minutes: 75 }; delete existing.serviceId;
+  const legacy = { customers: seedCustomers, staff: [{ ...seedStaff[0], active: false, name: 'Renamed staff' }, ...seedStaff.slice(1)], appointments: [existing] };
+  const map = storage({ 'salonpulse.demo.v3': JSON.stringify(legacy) });
+  const result = loadStore(); assert.equal(result.warning, '');
+  assert.equal(result.store.staff[0].active, false); assert.equal(result.store.staff[0].name, 'Renamed staff');
+  const migrated = result.store.appointments[0];
+  assert.equal(migrated.customerId, existing.customerId); assert.equal(migrated.staffId, existing.staffId);
+  assert.equal(migrated.serviceId, 'service-0'); assert.equal(migrated.price, 3200); assert.equal(migrated.minutes, 75);
+  assert.ok(map.has('salonpulse.demo.v3')); assert.deepEqual(loadStore().store, result.store);
+});
+test('unknown legacy services retained as inactive records, snapshots survive reload', () => {
+  const existing = { ...makeAppointment(booking), service: 'Legacy treatment', price: 7000, minutes: 80 }; delete existing.serviceId;
+  storage({ 'salonpulse.demo.v3': JSON.stringify({ customers: seedCustomers, staff: seedStaff, appointments: [existing] }) });
+  const result = loadStore(); assert.equal(result.warning, '');
+  const service = result.store.services.find(service => service.id === result.store.appointments[0].serviceId);
+  assert.equal(service.name, 'Legacy treatment'); assert.equal(service.active, false);
+  assert.equal(result.store.appointments[0].price, 7000);
+  assert.deepEqual(loadStore().store, result.store);
+});
+test('v4 load accepts historical snapshots that differ from renamed catalog records', () => {
+  const existing = makeAppointment(booking);
+  const catalog = seedServices.map(service => ({ ...service, name: service.name + ' updated', price: 10000, minutes: 120 }));
+  const store = { customers: seedCustomers, staff: seedStaff, services: catalog, appointments: [existing] };
+  storage({ [STORAGE_KEY]: JSON.stringify(store) });
+  assert.equal(loadStore().warning, ''); assert.deepEqual(loadStore().store, store);
 });

@@ -2,7 +2,7 @@
 
 A responsive salon-owner workspace with a desktop sidebar and mobile drawer.
 All data is fictional. Bookings persist in this browser's localStorage under
-`salonpulse.demo.v3`; there are no API calls or backend persistence.
+`salonpulse.demo.v4`; there are no API calls or backend persistence.
 The dashboard uses the current date and time in Lahore (PKT, UTC+05:00).
 On first use, five sample appointments are created for the current Lahore date.
 
@@ -51,7 +51,7 @@ queries. `StaffPage.tsx` and `staff.css` provide the responsive directory/editor
 Appointments use `staffId` and retain a name snapshot. Renaming staff keeps all
 bookings linked. Current names display from the shared directory.
 
-The store now uses `salonpulse.demo.v3`. Existing v2 customer data and v1
+The store now uses `salonpulse.demo.v4`. Existing v3 staff data, v2 customer data and v1
 appointment data migrate automatically while retaining their original keys.
 Known employee names map to seed IDs; unknown legacy names are retained as
 inactive employees with unconfigured hours. Migration does not reject existing
@@ -122,7 +122,7 @@ New appointment includes Add customer, using the same form and store. Saving a
 new customer selects them automatically and preserves the rest of the booking.
 Cancelling the booking does not remove an already saved customer.
 
-Customers, staff and bookings are written together to `salonpulse.demo.v3`. Existing
+Customers, staff and bookings are written together to `salonpulse.demo.v4`. Existing
 Day 2 `salonpulse.appointments.v1` bookings migrate to customer IDs on load; the
 old key is retained. Failed migration or storage writes show a warning. Data
 remains browser-local and is removed by clearing site storage.
@@ -138,3 +138,34 @@ Run the focused domain regression tests with Node.js 24:
 npm.cmd test
 npm.cmd run build
 ```
+
+## Services management
+
+Services is a shared catalog with stable IDs, name, optional category/description,
+whole-minute duration, PKR price, and active status. Search and status/category
+filters include empty states. Active names must be unique after trimming,
+collapsing whitespace and case normalization. Inactive duplicates are allowed,
+but reactivation is checked. Records cannot be deleted.
+
+Duration supports 1-1,440 whole minutes. Price supports PKR 0-10,000,000 with up
+to two decimal places. These are prototype input limits. Free services are valid.
+Deactivating a service with upcoming or ongoing bookings requires confirmation;
+existing appointments remain unchanged.
+
+Appointments store `serviceId`, booked service name, price, and duration as
+snapshots. Catalog edits never change existing bookings, historical revenue, or
+the duration used to detect conflicts against an existing appointment.
+New bookings use current active catalog values. Editing preserves the original
+terms by default; explicitly selecting **Use current catalog price and duration**
+recalculates them. Changing to another service also requires this choice. Both
+shift and overlap checks use the effective chosen duration. A booking with an
+inactive service can retain its original terms; it cannot recalculate that
+inactive service. Completed/cancelled bookings remain read-only.
+
+`services.ts` owns catalog types, validation, snapshot resolution, and pending
+booking queries. `ServicesPage.tsx` and `services.css` provide directory/editor
+presentation. The app's shared store owns the only mutable service catalog.
+`salonpulse.demo.v4` adds service IDs and migrates v3/v2/v1 data, preserving
+customer IDs, staff IDs, appointment IDs, booked prices, and booked durations.
+Original localStorage keys are retained. Unknown legacy service names are kept
+as inactive catalog records. There is no backend integration.
