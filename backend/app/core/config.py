@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="SalonPulse API", min_length=1)
     app_env: Literal["development", "test", "staging", "production"] = "development"
     debug: bool = False
+    # SQLAlchemy URL: postgresql+psycopg://...; optional for liveness/docs startup.
     database_url: SecretStr | None = None
     jwt_secret_key: SecretStr | None = None
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
