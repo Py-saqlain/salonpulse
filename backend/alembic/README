@@ -1,0 +1,3 @@
+SalonPulse PostgreSQL migrations. See ../README.md for configuration and review.
+DATABASE_URL comes from Pydantic Settings; never add credentials to alembic.ini.
+The initial revision is generated only and has not been applied.

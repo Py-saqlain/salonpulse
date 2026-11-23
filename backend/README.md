@@ -46,8 +46,7 @@ These conservative defaults should be revisited when deployment worker counts
 and PostgreSQL connection limits are known.
 
 `get_db` provides a session per request. Session exit closes the session and
-rolls back any uncommitted transaction. Future writes must explicitly commit;
-this task adds no writes, models, schemas, migrations or tables. Application
+rolls back any uncommitted transaction. Future writes must explicitly commit. Application
 shutdown disposes the engine pool. SQL logging is disabled, parameters are hidden,
 and handled database failures return a generic response.
 
@@ -69,3 +68,36 @@ Invoke-RestMethod 'http://127.0.0.1:8000/health/db'
 Automated database tests mock SQLAlchemy or override FastAPI dependencies. They
 do not require PostgreSQL or a real password. Live database connectivity must be
 verified after you enter the private local URL. No credentials are generated.
+
+## Migration configuration
+
+Alembic reads `DATABASE_URL` from the same Pydantic Settings as FastAPI. No URL
+is stored in `alembic.ini`; URL objects are passed directly to SQLAlchemy so
+percent-encoded passwords do not pass through INI interpolation. All five ORM
+models are registered through `app.models` before metadata is inspected.
+
+From `backend/`, inspect the revision and database state with:
+
+```powershell
+$env:DEBUG = 'false'
+.\.venv\Scripts\python.exe -m alembic heads
+.\.venv\Scripts\python.exe -m alembic history
+.\.venv\Scripts\python.exe -m alembic current
+```
+
+The initial revision is `b56e17b6641d` (`create initial salonpulse schema`). It
+has been generated and reviewed but **has not been applied**. Application startup
+does not create tables. Applying migrations requires a separate deployment step.
+
+Future revision generation uses `python -m alembic revision --autogenerate -m
+"describe schema change"` after the previous revision has been applied.
+CLI autogeneration, `current`, and `check` use a PostgreSQL read-only transaction
+and disable Alembic's automatic version-table creation. Programmatic callers of
+inspection/autogeneration commands must set `config.attributes["read_only"] = True`.
+
+Type and server-default comparisons are enabled. The named CHECK constraint
+plugin detects added/removed checks; it does **not** detect expression changes
+under an unchanged constraint name. Always review generated revisions, including
+enum checks and any proposed drops. Model `onupdate` timestamps remain a
+SQLAlchemy behavior, not a database trigger. Migration tests compile and compare
+PostgreSQL DDL using a mock engine without executing database operations.
