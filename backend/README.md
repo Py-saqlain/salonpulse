@@ -86,8 +86,8 @@ $env:DEBUG = 'false'
 ```
 
 The initial revision is `b56e17b6641d` (`create initial salonpulse schema`). It
-has been generated and reviewed but **has not been applied**. Application startup
-does not create tables. Applying migrations requires a separate deployment step.
+has been applied to the local development database. Other environments require
+a separate migration deployment step; application startup does not create tables.
 
 Future revision generation uses `python -m alembic revision --autogenerate -m
 "describe schema change"` after the previous revision has been applied.
@@ -101,3 +101,32 @@ under an unchanged constraint name. Always review generated revisions, including
 enum checks and any proposed drops. Model `onupdate` timestamps remain a
 SQLAlchemy behavior, not a database trigger. Migration tests compile and compare
 PostgreSQL DDL using a mock engine without executing database operations.
+
+The active-service-name index uses `lower(TRIM(BOTH FROM name))` in the ORM,
+matching PostgreSQL's reflected spelling of the original `lower(trim(name))`.
+The existing index and initial revision are unchanged; index comparison remains
+enabled without custom filters. `python -m alembic check` should report no pending
+schema operations on the migrated local database.
+
+## Optional live database integrity tests
+
+The default suite does not connect to PostgreSQL. To include the live integrity
+tests, run from `backend/` with the private `.env` configured:
+
+```powershell
+$env:DEBUG = 'false'
+$env:SALONPULSE_RUN_DB_TESTS = '1'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+Remove-Item Env:SALONPULSE_RUN_DB_TESTS
+```
+
+The live suite refuses any URL except the local `salonpulse_dev` database on port
+5432 as `salonpulse_app`, and verifies the connected database/role/port too. Each
+test creates unique temporary records inside an outer transaction, uses savepoints
+for expected constraint violations, and rolls back on success or failure. Tests
+never commit or run DDL. They check record IDs before/after the suite and confirm
+that the existing service index was not recreated. No existing records are used
+as update/delete targets. The initial revision must already be applied.
+
+A live downgrade/upgrade round-trip requires a separately provisioned disposable
+database. Never run that round-trip against `salonpulse_dev`.

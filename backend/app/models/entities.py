@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     Boolean, CheckConstraint, DateTime, Enum as SAEnum, ForeignKey,
     ForeignKeyConstraint, Index, Integer, Numeric, String, Text,
-    UniqueConstraint, Uuid, func, text,
+    UniqueConstraint, Uuid, func, literal_column, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -105,7 +105,9 @@ class Service(TenantRecord, Base):
     )
 
 
-Index("uq_services_business_active_name", Service.business_id, func.lower(func.trim(Service.name)),
+# Match PostgreSQL's reflected SQL-standard spelling to avoid false Alembic diffs.
+# This fixed SQL fragment has the same semantics as trim(name); no user input.
+Index("uq_services_business_active_name", Service.business_id, func.lower(literal_column("TRIM(BOTH FROM name)")),
       unique=True, postgresql_where=Service.active.is_(True))
 
 

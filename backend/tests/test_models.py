@@ -108,7 +108,7 @@ class ModelTests(unittest.TestCase):
     def test_active_service_names_have_normalized_tenant_unique_index(self):
         index = next(item for item in Service.__table__.indexes if item.unique)
         ddl = str(CreateIndex(index).compile(dialect=self.dialect))
-        self.assertIn("business_id, lower(trim(name))", ddl)
+        self.assertIn("business_id, lower(TRIM(BOTH FROM name))", ddl)
         self.assertIn("WHERE active IS true", ddl)
 
     def test_numeric_and_time_constraints(self):

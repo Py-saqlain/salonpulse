@@ -75,11 +75,18 @@ class MigrationTests(unittest.TestCase):
                              {signature(item) for item in Base.metadata.tables[name].constraints}, name)
 
     def test_indexes_including_partial_expression_index_match(self):
-        actual = {self.sql(statement) for statement in self.statements if isinstance(statement, CreateIndex)}
-        expected = {self.sql(CreateIndex(index)) for table in Base.metadata.tables.values() for index in table.indexes}
+        def index_sql(statement):
+            sql = self.sql(statement)
+            if statement.element.name == "uq_services_business_active_name":
+                # The immutable initial revision uses equivalent trim(name).
+                sql = sql.replace("lower(trim(name))", "lower(TRIM(BOTH FROM name))")
+            return sql
+
+        actual = {index_sql(statement) for statement in self.statements if isinstance(statement, CreateIndex)}
+        expected = {index_sql(CreateIndex(index)) for table in Base.metadata.tables.values() for index in table.indexes}
         self.assertEqual(actual, expected)
         self.assertEqual(len(actual), 9)
-        self.assertTrue(any("lower(trim(name))" in ddl and "WHERE active IS true" in ddl for ddl in actual))
+        self.assertTrue(any("lower(TRIM(BOTH FROM name))" in ddl and "WHERE active IS true" in ddl for ddl in actual))
 
     def test_postgresql_compilation_and_safe_reverse_dependency_order(self):
         for statement in self.statements:
