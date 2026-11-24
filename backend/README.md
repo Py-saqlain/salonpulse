@@ -189,10 +189,9 @@ use `Cache-Control: no-store` and `Pragma: no-cache`.
 
 Tokens use fixed HS256 with `sub` (canonical User UUID), `iat`, and `exp` claims.
 Signature, algorithm, expiry, issued-at time, required claims, and subject format
-are validated. `get_current_user` is a reusable bearer-token dependency that
-loads the live User and rejects missing/inactive accounts. Roles and businesses
-come from the database, not client-provided token claims. No business CRUD
-endpoints are exposed by this task.
+are validated. `get_current_user` loads the live User and rejects deleted/inactive
+accounts. Roles and businesses come from the database, not client-provided token
+claims. Customer, staff, service, and appointment CRUD endpoints remain unimplemented.
 
 ### Private signing-key setup
 
@@ -233,3 +232,46 @@ ownership verification, refresh tokens, password reset, MFA, token revocation,
 and signing-key rotation are not implemented. Existing tokens expire naturally;
 account deactivation is checked by the bearer dependency. Frontend token storage
 and integration remain outside this backend task.
+
+## Authorization and tenant isolation
+
+`GET /api/auth/me` returns the active authenticated user's safe profile.
+`GET /api/business/me` returns that user's own business: ID, name, timezone,
+currency, and timestamps. Both accept `Authorization: Bearer <access token>`,
+allow owner and staff identities, and send `Cache-Control: no-store`. Query
+parameters or headers such as `business_id`, `role`, and `X-Business-ID` cannot
+override identity, role, or business context. Passwords, hashes, and internal
+settings are never included. No public test endpoints are registered.
+
+Reusable FastAPI dependencies in `app/api/dependencies.py`:
+
+- `get_current_user`: validates the JWT and loads the active login identity.
+- `require_owner`: permits only owners; staff receives HTTP 403.
+- `require_owner_or_staff`: permits both supported roles.
+- `get_current_business`: loads the tenant root using the live user's business ID.
+- `get_tenant_scope`: creates an immutable scope from that same user record.
+
+Missing/invalid authentication returns HTTP 401 with a Bearer challenge.
+Insufficient role permission returns HTTP 403. The current database role is
+checked on each request, so a role change takes effect even for an older token.
+
+Future CRUD services must receive `TenantScope` via `Depends(get_tenant_scope)`.
+`app/db/tenant.py` provides scoped `select`, `get`, `update`, and `delete` methods
+for Customer, Staff, Service, and Appointment. Single-record operations combine
+the business ID and resource UUID in the SQL predicate, including update/delete
+statements. Missing and cross-business records produce the same HTTP 404.
+Updates cannot change IDs, tenant ownership, or timestamps. Login users and
+Business roots are excluded from these generic write helpers. Helpers do not
+commit: the calling service owns transactions and must validate mutable fields.
+
+Select role permission separately from scoping when introducing future mutation
+routes. Scoping does not itself grant permission to write or bypass historical
+foreign-key restrictions. Existing composite foreign keys remain unchanged.
+Login identity lookup by signed subject and tenant-root resolution are distinct
+from tenant resource lookups. This is explicit application-level scoping, not
+PostgreSQL row-level security: future code must consistently use these helpers.
+
+Opt-in rollback-only tests cover independent business profiles, bearer failures,
+deleted/inactive users, owner/staff permissions, role/tenant claim manipulation,
+and cross-tenant reads/updates/deletes for all four resource models. Role test
+routes are attached only to isolated test app instances.

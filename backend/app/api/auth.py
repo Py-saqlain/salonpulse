@@ -3,15 +3,22 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_auth_settings, unauthorized
+from app.api.dependencies import get_auth_settings, require_owner_or_staff, unauthorized
 from app.core.config import Settings
 from app.core.security import create_access_token
 from app.db.session import get_db
+from app.models import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from app.services.auth import DuplicateEmail, InvalidCredentials, authenticate_user, register_owner
 
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+
+
+@router.get("/me", response_model=UserResponse)
+def user_profile(response: Response, user: Annotated[User, Depends(require_owner_or_staff)]) -> User:
+    response.headers["Cache-Control"] = "no-store"
+    return user
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)

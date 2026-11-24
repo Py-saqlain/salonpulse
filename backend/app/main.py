@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, settings
 from app.db.session import Database, get_db
 from app.api.auth import router as auth_router
+from app.api.business import router as business_router
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -28,6 +29,7 @@ def create_app(config: Settings) -> FastAPI:
     application.state.database = database
     application.state.settings = config
     application.include_router(auth_router)
+    application.include_router(business_router)
 
     @application.exception_handler(RequestValidationError)
     async def safe_validation_error(request, error: RequestValidationError):

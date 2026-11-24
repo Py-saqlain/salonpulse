@@ -17,7 +17,7 @@ with patch.dict(os.environ, {}, clear=True):
     from app.main import create_app
 
 
-async def request(app, method="GET", origin=None, extra_headers=(), path="/health", body=b""):
+async def request(app, method="GET", origin=None, extra_headers=(), path="/health", body=b"", query_string=b""):
     """Exercise the ASGI middleware stack without additional HTTP test packages."""
     headers = [(b"host", b"testserver")]
     if origin:
@@ -34,7 +34,7 @@ async def request(app, method="GET", origin=None, extra_headers=(), path="/healt
     await app({
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
         "method": method, "scheme": "http", "path": path, "raw_path": path.encode(),
-        "query_string": b"", "root_path": "", "headers": headers,
+        "query_string": query_string, "root_path": "", "headers": headers,
         "client": ("127.0.0.1", 1234), "server": ("testserver", 80),
     }, receive, send)
     start = next(message for message in messages if message["type"] == "http.response.start")
