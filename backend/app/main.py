@@ -3,12 +3,15 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, settings
 from app.db.session import Database, get_db
+from app.api.auth import router as auth_router
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -23,6 +26,16 @@ def create_app(config: Settings) -> FastAPI:
 
     application = FastAPI(title=config.app_name, debug=config.debug, lifespan=lifespan)
     application.state.database = database
+    application.state.settings = config
+    application.include_router(auth_router)
+
+    @application.exception_handler(RequestValidationError)
+    async def safe_validation_error(request, error: RequestValidationError):
+        # FastAPI's default validation response can echo submitted passwords.
+        return JSONResponse(status_code=422, content={"detail": [
+            {"loc": list(item["loc"]), "msg": item["msg"], "type": item["type"]}
+            for item in error.errors()
+        ]})
     application.add_middleware(
         CORSMiddleware,
         allow_origins=config.cors_origins,

@@ -17,7 +17,7 @@ with patch.dict(os.environ, {}, clear=True):
     from app.main import create_app
 
 
-async def request(app, method="GET", origin=None, extra_headers=(), path="/health"):
+async def request(app, method="GET", origin=None, extra_headers=(), path="/health", body=b""):
     """Exercise the ASGI middleware stack without additional HTTP test packages."""
     headers = [(b"host", b"testserver")]
     if origin:
@@ -26,7 +26,7 @@ async def request(app, method="GET", origin=None, extra_headers=(), path="/healt
     messages = []
 
     async def receive():
-        return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message):
         messages.append(message)

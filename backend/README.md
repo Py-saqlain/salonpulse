@@ -30,7 +30,8 @@ DATABASE_URL=postgresql+psycopg://salonpulse_app:REPLACE_WITH_URL_ENCODED_PASSWO
 Percent-encode special characters in the password, such as `@`, `:`, `/`, `#`,
 and `%`, before putting it into the URL. Do this privately, not through a public
 online encoder. `.env` is ignored by Git. Environment variables override `.env`;
-restart the backend after changing configuration. JWT configuration is unused.
+restart the backend after changing configuration. JWT configuration is described
+under Authentication below.
 
 ## Connection behavior
 
@@ -46,7 +47,8 @@ These conservative defaults should be revisited when deployment worker counts
 and PostgreSQL connection limits are known.
 
 `get_db` provides a session per request. Session exit closes the session and
-rolls back any uncommitted transaction. Future writes must explicitly commit. Application
+rolls back any uncommitted transaction. Registration explicitly commits its
+business/user transaction atomically. Application
 shutdown disposes the engine pool. SQL logging is disabled, parameters are hidden,
 and handled database failures return a generic response.
 
@@ -124,11 +126,11 @@ The live suite refuses any URL except the local `salonpulse_dev` database on por
 5432 as `salonpulse_app`, and verifies the connected database/role/port too. Each
 test creates unique temporary records inside an outer transaction, uses savepoints
 for expected constraint violations, and rolls back on success or failure. Tests
-never commit or run DDL. They check record IDs before/after the suite and confirm
+never commit the outer transaction or run DDL. They check record IDs before/after the suite and confirm
 that the existing service index was not recreated. No existing records are used
 as update/delete targets. Both the initial and users revisions must already be
-applied. User fixtures use unusable test-only hash values; no hashing utilities
-or persistent login accounts are created by these tests.
+applied. Integrity fixtures use unusable test-only hash values; authentication
+fixtures exercise real hashing. No persistent login accounts are created.
 
 A live downgrade/upgrade round-trip requires a separately provisioned disposable
 database. Never run that round-trip against `salonpulse_dev`.
@@ -150,17 +152,84 @@ Full name and password hash must be nonblank. The business foreign key uses
 `RESTRICT`, and ORM relationships do not cascade-delete users. Timestamps and
 UUID generation follow the existing models.
 
-Roles are restricted to `owner` and `staff` in the ORM and database; owner and
-active are the requested defaults. These defaults are not an authorization
-policy. Future public registration must use an explicit input schema excluding
-role, business_id, is_active, and password_hash. Trusted server code must assign
-the new business/owner relationship and hash the password before constructing a
-User. Staff invitation/role changes must require explicit authorization. No
-registration, login, JWT, or hashing utilities are implemented in this task.
-Email syntax/deliverability validation also belongs in the future input layer.
+Roles are restricted to `owner` and `staff` in the ORM and database. Registration
+uses an explicit input schema excluding role, business_id, is_active, and
+password_hash; unknown fields are rejected. Server code assigns the new business
+and active owner role and hashes the password before constructing a User. Future
+staff invitation/role changes must require explicit authorization. Email syntax
+is validated, while ownership/deliverability verification is not implemented.
 
 Unit tests compile PostgreSQL migration DDL without executing it. Opt-in live
 tests validate all six tables and check required membership, global normalized
 email uniqueness, valid roles, business foreign keys, restricted deletion, and
 server defaults. Fixtures are always rolled back and all six tables are checked
 for unchanged record IDs afterward. Tests never apply migrations implicitly.
+
+## Authentication
+
+Install the pinned requirements in the existing virtual environment. Passwords
+use pwdlib with Argon2id and independent random salts. Registration passwords
+must contain 12–128 characters and cannot be entirely whitespace; spaces within
+a password are preserved. Passwords and hashes are excluded from responses and
+submitted values are omitted from validation errors.
+
+Both endpoints accept **JSON**, documented at `/docs`:
+
+| Endpoint | Request fields | Success |
+| --- | --- | --- |
+| `POST /api/auth/register` | `business_name`, `full_name`, `email`, `password` | HTTP 201: public user fields including `id`, `business_id`, `full_name`, `email`, `role`, `is_active` |
+| `POST /api/auth/login` | `email`, `password` | HTTP 200: `access_token`, `token_type: "bearer"` |
+
+Names are trimmed and emails are trimmed/lowercased. A globally unique email
+conflict returns HTTP 409; PostgreSQL's unique index resolves concurrent races,
+and registration rolls back both records if either insert or commit fails.
+Missing users, wrong passwords, and inactive users receive the same HTTP 401
+message. Unknown users still perform dummy Argon2 verification. Login responses
+use `Cache-Control: no-store` and `Pragma: no-cache`.
+
+Tokens use fixed HS256 with `sub` (canonical User UUID), `iat`, and `exp` claims.
+Signature, algorithm, expiry, issued-at time, required claims, and subject format
+are validated. `get_current_user` is a reusable bearer-token dependency that
+loads the live User and rejects missing/inactive accounts. Roles and businesses
+come from the database, not client-provided token claims. No business CRUD
+endpoints are exposed by this task.
+
+### Private signing-key setup
+
+The signing key is read from `JWT_SECRET_KEY` through Pydantic Settings and must
+contain at least 32 bytes. Use a cryptographically random key, not a memorable
+password. To generate a key from **32 random bytes** and save it directly into
+the existing ignored `backend/.env` without displaying it, run from `backend/`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/configure_jwt.py
+```
+
+This command only provisions a missing/blank JWT key. It retains an existing
+valid key and preserves other settings; it stops if an existing key is too short.
+It is a manual setup command, never executed automatically at server startup.
+Do not paste the key into chat, source code, command arguments, or logs. Protect
+the private file with your normal local account permissions. No real key is
+included in `.env.example`. Restart the backend after provisioning. Environment
+variables take precedence over `.env`, so remove any unintended JWT override
+privately before starting the server.
+
+Set `ACCESS_TOKEN_EXPIRE_MINUTES` privately if needed (default 30; allowed range
+1–1440). A missing signing key leaves health/docs available while auth endpoints
+return HTTP 503 without registering users. An explicitly configured key shorter
+than 32 bytes fails settings validation with input values hidden.
+
+### Authentication checks and deployment limits
+
+The opt-in test command above includes live registration/login tests on the
+guarded local development database. Registration commits occur inside an outer
+test transaction, so all fixtures are rolled back; all six tables are checked
+for unchanged IDs afterward. Tests use random, process-local signing keys rather
+than the real `.env` key. Commit-time unique-conflict handling is also simulated
+to exercise the concurrent-registration error path.
+
+Before internet deployment, add rate limiting/abuse controls and HTTPS. Email
+ownership verification, refresh tokens, password reset, MFA, token revocation,
+and signing-key rotation are not implemented. Existing tokens expire naturally;
+account deactivation is checked by the bearer dependency. Frontend token storage
+and integration remain outside this backend task.
