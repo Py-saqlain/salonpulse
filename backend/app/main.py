@@ -13,6 +13,9 @@ from app.core.config import Settings, settings
 from app.db.session import Database, get_db
 from app.api.auth import router as auth_router
 from app.api.business import router as business_router
+from app.api.customers import router as customers_router
+from app.api.staff import router as staff_router
+from app.api.services import router as services_router
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -30,6 +33,9 @@ def create_app(config: Settings) -> FastAPI:
     application.state.settings = config
     application.include_router(auth_router)
     application.include_router(business_router)
+    application.include_router(customers_router)
+    application.include_router(staff_router)
+    application.include_router(services_router)
 
     @application.exception_handler(RequestValidationError)
     async def safe_validation_error(request, error: RequestValidationError):

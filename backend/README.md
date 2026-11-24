@@ -191,7 +191,8 @@ Tokens use fixed HS256 with `sub` (canonical User UUID), `iat`, and `exp` claims
 Signature, algorithm, expiry, issued-at time, required claims, and subject format
 are validated. `get_current_user` loads the live User and rejects deleted/inactive
 accounts. Roles and businesses come from the database, not client-provided token
-claims. Customer, staff, service, and appointment CRUD endpoints remain unimplemented.
+claims. Customer, staff, and service CRUD endpoints are described below;
+appointment endpoints remain unimplemented.
 
 ### Private signing-key setup
 
@@ -255,7 +256,7 @@ Missing/invalid authentication returns HTTP 401 with a Bearer challenge.
 Insufficient role permission returns HTTP 403. The current database role is
 checked on each request, so a role change takes effect even for an older token.
 
-Future CRUD services must receive `TenantScope` via `Depends(get_tenant_scope)`.
+CRUD services receive `TenantScope` via `Depends(get_tenant_scope)`.
 `app/db/tenant.py` provides scoped `select`, `get`, `update`, and `delete` methods
 for Customer, Staff, Service, and Appointment. Single-record operations combine
 the business ID and resource UUID in the SQL predicate, including update/delete
@@ -264,7 +265,7 @@ Updates cannot change IDs, tenant ownership, or timestamps. Login users and
 Business roots are excluded from these generic write helpers. Helpers do not
 commit: the calling service owns transactions and must validate mutable fields.
 
-Select role permission separately from scoping when introducing future mutation
+Select role permission separately from scoping when introducing mutation
 routes. Scoping does not itself grant permission to write or bypass historical
 foreign-key restrictions. Existing composite foreign keys remain unchanged.
 Login identity lookup by signed subject and tenant-root resolution are distinct
@@ -275,3 +276,58 @@ Opt-in rollback-only tests cover independent business profiles, bearer failures,
 deleted/inactive users, owner/staff permissions, role/tenant claim manipulation,
 and cross-tenant reads/updates/deletes for all four resource models. Role test
 routes are attached only to isolated test app instances.
+
+## Customer, staff, and service CRUD
+
+Each collection supports the following authenticated JSON API:
+
+| Method | Path | Result |
+| --- | --- | --- |
+| POST | `/api/customers`, `/api/staff`, `/api/services` | HTTP 201 with the created record |
+| GET | same collection paths | HTTP 200 paginated list |
+| GET | collection path + `/{id}` | HTTP 200 with one tenant-scoped record |
+| PATCH | collection path + `/{id}` | HTTP 200 with the updated record |
+| DELETE | collection path + `/{id}` | HTTP 204 with no body |
+
+Owners and staff identities can read all three resources and manage customers.
+Only owners can create, edit, or delete staff and services. Every operation
+derives the business ID from the current database user. Input fields such as
+`business_id`, `id`, or `role` are rejected rather than mass-assigned. Cross-tenant
+and missing UUIDs return the same HTTP 404; invalid UUID syntax returns HTTP 422.
+
+Create fields (all records require a trimmed nonblank `name`, max 200 characters):
+
+- Customer: optional `phone`, `notes` (max 4,000 characters).
+- Staff: optional `phone`, `specialty` (max 200 characters), `active` (default true).
+- Service: required integer `duration_minutes` (1–1,440), required `price` (PKR,
+  nonnegative, max 12 digits including two decimal places); optional `category`
+  (max 100 characters), `active` (default true).
+
+Pakistani mobile formats `03...`, `923...`, `00923...`, and `+923...` are normalized
+to `+923...`; spaces, parentheses, and hyphens are accepted. Missing/blank phone
+numbers become NULL. Nonblank phones must be unique per business within their
+resource type. Names need not be unique for customers/staff. Active service names
+must be unique within a business after trimming and case normalization; inactive
+duplicates are allowed, and reactivation is checked against that same index.
+
+PATCH requires at least one supported field. Omitted fields are preserved;
+explicit NULL clears nullable phone/notes/specialty/category fields. Required
+fields cannot be cleared. Boolean fields require JSON booleans, and money values
+are returned as decimal strings to preserve precision.
+
+List query parameters are `limit` (default 20, range 1–100) and `offset` (default 0,
+nonnegative). Responses contain `items`, `total`, `limit`, and `offset`. Counts
+and rows are tenant-filtered, ordered by creation time descending then UUID for
+stable pagination. There are no search/filter parameters yet.
+
+Duplicate conflicts return HTTP 409 without exposing database details. Deleting
+a record referenced by an appointment returns HTTP 409; history is never cascaded
+away. Staff/services can instead be explicitly marked inactive using PATCH.
+Service price/duration edits do not rewrite appointment snapshots or timing.
+No appointment API, staff working-hours model, or frontend integration is added.
+
+The shared resource service commits validated writes atomically, including the
+transaction opened by authentication; failures roll back the request session.
+Deletion is permanent only for unreferenced records. Rollback-only integration
+tests cover CRUD, tenant isolation, owner/staff permissions, pagination, invalid
+inputs, normalized duplicates, and appointment-reference protection.
