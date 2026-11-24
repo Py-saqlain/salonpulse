@@ -15,12 +15,12 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from app.db.base import Base
-from app.models import Appointment, AppointmentStatus, AppointmentType, Business, Customer, Service, Staff
+from app.models import Appointment, AppointmentStatus, AppointmentType, Business, Customer, Service, Staff, User, UserRole
 
 
 @unittest.skipUnless(os.environ.get("SALONPULSE_RUN_DB_TESTS") == "1", "local PostgreSQL tests require explicit opt-in")
@@ -223,11 +223,11 @@ class DatabaseIntegrityTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.rejects(Appointment.__table__.insert().values(**self.booking_values(**changes)), "23514")
 
-    def test_live_revision_schema_constraints_and_no_pending_changes(self):
+    def test_current_revision_schema_has_no_drift(self):
         inspector = inspect(self.connection)
         self.assertEqual(set(inspector.get_table_names()), set(Base.metadata.tables) | {"alembic_version"})
         self.assertEqual(self.connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all(),
-                         ["b56e17b6641d"])
+                         ["6d7519d70bb2"])
         totals = {"checks": 0, "foreign_keys": 0, "uniques": 0, "indexes": 0}
         for name, table in Base.metadata.tables.items():
             self.assertEqual(inspector.get_pk_constraint(name)["constrained_columns"], ["id"])
@@ -249,12 +249,95 @@ class DatabaseIntegrityTests(unittest.TestCase):
             indexes = [i for i in inspector.get_indexes(name) if not i.get("duplicates_constraint")]
             self.assertEqual({i["name"] for i in indexes}, {str(i.name) for i in table.indexes})
             totals["indexes"] += len(indexes)
-        self.assertEqual(totals, dict(checks=14, foreign_keys=7, uniques=5, indexes=9))
+        self.assertEqual(totals, dict(checks=18, foreign_keys=8, uniques=5, indexes=11))
         migration = MigrationContext.configure(connection=self.connection, opts={
             "target_metadata": Base.metadata, "compare_type": True, "compare_server_default": True,
             "autogenerate_plugins": ["alembic.autogenerate.*", "alembic.ext.checkconstraint_byname"],
         })
         self.assertEqual(compare_metadata(migration, Base.metadata), [])
+
+    def user_values(self, **overrides):
+        values = dict(business_id=self.business.id, full_name="Integrity test user",
+                      email=f"integrity-{uuid4().hex}@example.test",
+                      # Deliberately unusable fixture, never a plaintext password.
+                      password_hash="!unusable-integrity-test-fixture", is_active=False)
+        values.update(overrides)
+        return values
+
+    def test_user_required_fields_including_business_membership(self):
+        for field in ("business_id", "full_name", "email", "password_hash", "role", "is_active"):
+            with self.subTest(field=field):
+                self.rejects(User.__table__.insert().values(**self.user_values(**{field: None})), "23502")
+
+    def test_user_email_uniqueness_is_case_insensitive_and_global(self):
+        email = f"unique-{uuid4().hex}@example.test"
+        user = User(**self.user_values(email=email.upper()))
+        self.session.add(user)
+        self.session.flush()
+        self.assertEqual(user.email, email)
+        other_business = Business(name="User uniqueness " + uuid4().hex)
+        self.session.add(other_business)
+        self.session.flush()
+        duplicate = User(**self.user_values(business_id=other_business.id, email="  " + email.upper() + "  "))
+        for business_id in (self.business.id, other_business.id):
+            self.rejects(User.__table__.insert().values(**self.user_values(business_id=business_id, email=duplicate.email)),
+                         "23505", "uq_users_email")
+        # Raw SQL callers must also obey normalization; ORM does this automatically.
+        self.rejects(User.__table__.insert().values(**self.user_values(email="  UPPER@example.test  ")),
+                     "23514", "ck_users_normalized_email")
+
+    def test_user_roles_accept_owner_staff_and_reject_arbitrary_roles(self):
+        for role in UserRole:
+            stored = self.connection.execute(User.__table__.insert().values(**self.user_values(role=role))
+                                             .returning(User.__table__.c.role)).scalar_one()
+            self.assertEqual(stored, role)
+        user_id = self.connection.execute(User.__table__.insert().values(**self.user_values())
+                                          .returning(User.__table__.c.id)).scalar_one()
+        for role in ("admin", "OWNER", ""):
+            statement = text("UPDATE users SET role=:role WHERE id=:id").bindparams(role=role, id=user_id)
+            self.rejects(statement, "23514", "ck_users_user_role")
+
+    def test_user_oversized_role_is_rejected_by_column_length(self):
+        user_id = self.connection.execute(User.__table__.insert().values(**self.user_values())
+                                          .returning(User.__table__.c.id)).scalar_one()
+        with self.assertRaises(DataError) as caught:
+            with self.connection.begin_nested():
+                self.connection.execute(text("UPDATE users SET role=:role WHERE id=:id"),
+                                        {"role": "superuser", "id": user_id})
+        self.assertEqual(caught.exception.orig.sqlstate, "22001")
+        # The savepoint rollback leaves the row and outer transaction usable.
+        self.assertEqual(self.connection.execute(text("SELECT role FROM users WHERE id=:id"),
+                                                {"id": user_id}).scalar_one(), "owner")
+
+    def test_user_invalid_business_reference_is_rejected(self):
+        self.rejects(User.__table__.insert().values(**self.user_values(business_id=uuid4())),
+                     "23503", "fk_users_business_id_businesses")
+
+    def test_user_business_deletion_is_restricted(self):
+        # This business has only a user, so no employee/customer FK can mask a bug.
+        business = Business(name="User-only " + uuid4().hex)
+        self.session.add(business)
+        self.session.flush()
+        user = User(**self.user_values(business_id=business.id))
+        self.session.add(user)
+        self.session.flush()
+        self.rejects(Business.__table__.delete().where(Business.id == business.id),
+                     "23503", "fk_users_business_id_businesses")
+        self.session.expire_all()
+        self.assertEqual(user.business.id, business.id)
+
+    def test_user_server_defaults_and_business_relationship(self):
+        # Omit role/is_active to verify PostgreSQL defaults rather than Python defaults.
+        user_id = uuid4()
+        self.connection.execute(text(
+            "INSERT INTO users (id,business_id,full_name,email,password_hash) "
+            "VALUES (:id,:business_id,:full_name,:email,:password_hash)"
+        ), {"id": user_id, **{key: value for key, value in self.user_values().items() if key != "is_active"}})
+        user = self.session.get(User, user_id)
+        self.assertEqual(user.role, UserRole.OWNER)
+        self.assertTrue(user.is_active)
+        self.assertIs(user.business, self.business)
+        self.assertIn(user, self.business.users)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,8 @@ class MigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.scripts = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-        cls.revision = cls.scripts.get_revision(cls.scripts.get_current_head())
+        # Pin this test to the initial revision, independent of later migrations.
+        cls.revision = cls.scripts.get_revision("b56e17b6641d")
         cls.statements = []
         cls.engine = create_mock_engine(
             "postgresql+psycopg://", lambda sql, *args, **kwargs: cls.statements.append(sql),
@@ -42,7 +43,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(len(self.scripts.get_heads()), 1)
         self.assertIsNone(self.revision.down_revision)
         self.assertEqual(self.revision.doc, "create initial salonpulse schema")
-        self.assertEqual(set(self.tables), set(Base.metadata.tables))
+        self.assertEqual(set(self.tables), {"businesses", "customers", "staff", "services", "appointments"})
         self.assertEqual(len(self.tables), 5)
         self.assertTrue(all(isinstance(sql, (CreateTable, CreateIndex)) for sql in self.statements))
 
@@ -83,7 +84,8 @@ class MigrationTests(unittest.TestCase):
             return sql
 
         actual = {index_sql(statement) for statement in self.statements if isinstance(statement, CreateIndex)}
-        expected = {index_sql(CreateIndex(index)) for table in Base.metadata.tables.values() for index in table.indexes}
+        expected = {index_sql(CreateIndex(index)) for name, table in Base.metadata.tables.items()
+                    if name in self.tables for index in table.indexes}
         self.assertEqual(actual, expected)
         self.assertEqual(len(actual), 9)
         self.assertTrue(any("lower(TRIM(BOTH FROM name))" in ddl and "WHERE active IS true" in ddl for ddl in actual))

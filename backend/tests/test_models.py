@@ -25,7 +25,7 @@ class ModelTests(unittest.TestCase):
             configure_mappers()
 
     def test_all_models_registered_and_postgresql_ddl_compiles(self):
-        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments"})
+        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments", "users"})
         for table in Base.metadata.sorted_tables:
             ddl = str(CreateTable(table).compile(dialect=self.dialect))
             self.assertIn("CREATE TABLE", ddl)
@@ -57,7 +57,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(Business.__table__.c.currency.default.arg, "PKR")
 
     def test_relationships_are_bidirectional_and_tenant_aware(self):
-        self.assertEqual(set(inspect(Business).relationships.keys()), {"customers", "staff", "services", "appointments"})
+        self.assertEqual(set(inspect(Business).relationships.keys()), {"customers", "staff", "services", "appointments", "users"})
         for name in ["customer", "staff", "service"]:
             relation = inspect(Appointment).relationships[name]
             self.assertFalse(relation.uselist)

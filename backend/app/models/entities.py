@@ -10,7 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint, Index, Integer, Numeric, String, Text,
     UniqueConstraint, Uuid, func, literal_column, text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base
 
@@ -40,6 +40,7 @@ class Business(Record, Base):
     staff: Mapped[list["Staff"]] = relationship(back_populates="business", passive_deletes="all")
     services: Mapped[list["Service"]] = relationship(back_populates="business", passive_deletes="all")
     appointments: Mapped[list["Appointment"]] = relationship(back_populates="business", passive_deletes="all")
+    users: Mapped[list["User"]] = relationship(back_populates="business", passive_deletes="all")
 
 
 class Customer(TenantRecord, Base):
@@ -126,6 +127,51 @@ class AppointmentType(str, Enum):
 def enum_column(enum: type[Enum], name: str) -> SAEnum:
     return SAEnum(enum, name=name, native_enum=False, create_constraint=True,
                   validate_strings=True, values_callable=lambda members: [member.value for member in members])
+
+
+class UserRole(str, Enum):
+    OWNER = "owner"
+    STAFF = "staff"
+
+
+class User(TenantRecord, Base):
+    """Login identity, separate from Staff. Only trusted code assigns roles.
+
+    Future public registration must not mass-assign role, is_active, or tenant
+    identifiers. Password hashing must happen before password_hash is assigned;
+    this model deliberately accepts no plaintext password field.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("length(trim(full_name)) > 0", name="full_name_not_blank"),
+        CheckConstraint("length(trim(email)) > 0 AND email = lower(trim(email))", name="normalized_email"),
+        CheckConstraint("length(trim(password_hash)) > 0", name="password_hash_not_blank"),
+    )
+
+    full_name: Mapped[str] = mapped_column(String(200))
+    email: Mapped[str] = mapped_column(String(320))
+    password_hash: Mapped[str] = mapped_column(Text)
+    role: Mapped[UserRole] = mapped_column(
+        enum_column(UserRole, "user_role"), default=UserRole.OWNER, server_default="owner",
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    business: Mapped[Business] = relationship(back_populates="users")
+
+    @validates("email")
+    def normalize_email(self, key: str, value: str) -> str:
+        value = value.strip().lower()
+        if not value:
+            raise ValueError("Email must not be blank")
+        return value
+
+    @validates("role")
+    def validate_role(self, key: str, value: UserRole | str) -> UserRole:
+        return UserRole(value)
+
+
+# One global functional unique index; no redundant plain-email index/constraint.
+Index("uq_users_email", func.lower(User.email), unique=True)
 
 
 class Appointment(TenantRecord, Base):
