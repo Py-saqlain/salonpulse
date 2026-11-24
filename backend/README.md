@@ -192,7 +192,7 @@ Signature, algorithm, expiry, issued-at time, required claims, and subject forma
 are validated. `get_current_user` loads the live User and rejects deleted/inactive
 accounts. Roles and businesses come from the database, not client-provided token
 claims. Customer, staff, and service CRUD endpoints are described below;
-appointment endpoints remain unimplemented.
+appointment endpoints are described in the appointment-management section.
 
 ### Private signing-key setup
 
@@ -324,10 +324,80 @@ Duplicate conflicts return HTTP 409 without exposing database details. Deleting
 a record referenced by an appointment returns HTTP 409; history is never cascaded
 away. Staff/services can instead be explicitly marked inactive using PATCH.
 Service price/duration edits do not rewrite appointment snapshots or timing.
-No appointment API, staff working-hours model, or frontend integration is added.
+Staff working-hours models and frontend integration remain outside this CRUD task.
 
 The shared resource service commits validated writes atomically, including the
 transaction opened by authentication; failures roll back the request session.
 Deletion is permanent only for unreferenced records. Rollback-only integration
 tests cover CRUD, tenant isolation, owner/staff permissions, pagination, invalid
 inputs, normalized duplicates, and appointment-reference protection.
+
+## Appointment management
+
+Owners and staff can use POST/GET `/api/appointments` and GET/PATCH/DELETE
+`/api/appointments/{id}`. All lookups and writes are tenant-scoped. Foreign or
+missing customer/staff/service/appointment IDs return HTTP 404 without disclosing
+another business's records. No migrations or schema changes were needed.
+
+POST accepts `customer_id`, `staff_id`, `service_id`, optional `booking_type`
+(`scheduled` by default), and `starts_at` as an ISO datetime **with a timezone**.
+Scheduled appointments require a future start time and begin `confirmed`.
+Walk-ins use `booking_type: "walk_in"`, omit `starts_at`, and receive the server's
+current UTC start and `in_progress` status. Both require active staff/services.
+The server derives business ID, end time, price, duration, and initial status;
+clients cannot supply snapshot/end/identity fields.
+
+PATCH accepts customer/staff/service IDs, a timezone-aware start, status, and
+`recalculate_service` (boolean). Only confirmed appointments can change booking
+details. Booking edits must remain in the future, use active staff/services, and
+pass the same overlap validation. Normal edits retain the saved price/duration.
+Choosing a different service recalculates both snapshots; for the same service,
+send `recalculate_service: true` explicitly to adopt current catalog values.
+Recalculation also rechecks the newly computed end time for conflicts. Change
+booking details and status in separate requests.
+
+Status transitions are `confirmed -> in_progress -> completed`, with cancellation
+allowed from confirmed/in-progress. Starting before the scheduled time is
+rejected. In-progress booking details and terminal records cannot be edited;
+cancelled bookings cannot be reactivated. Repeating the current status is an
+idempotent no-op for booking fields. Early completion is allowed once started.
+
+DELETE is **cancellation**, not permanent deletion: it returns HTTP 204 and keeps
+the record available to GET/history. Repeated cancellation is safe. Completed
+records cannot be cancelled/deleted (HTTP 409). Cancelled/completed records no
+longer reserve a staff slot. Confirmed/in-progress intervals block overlapping
+bookings for the same staff; adjacent intervals are allowed. Overlaps and invalid
+transitions return HTTP 409, while invalid times/input return HTTP 422.
+
+List responses use `items`, `total`, `limit` (1–100, default 20), and `offset`.
+Optional filters are `date=YYYY-MM-DD`, `staff_id`, and `status`. Date means the
+appointment's **start date in the business timezone** (Asia/Karachi by default),
+with UTC boundaries calculated server-side. A foreign staff filter returns 404.
+Appointment response timestamps are consistently serialized in UTC, independent
+of the PostgreSQL session timezone.
+Ordering is start time then UUID. Cancelled/completed rows remain included unless
+filtered out.
+
+### Concurrent booking protection
+
+Each create/edit/status/cancellation transaction first locks its existing
+Business row with PostgreSQL `FOR NO KEY UPDATE`. This serializes appointment
+writes within that business, including staff reassignments and reschedules,
+while other businesses remain independent. The engine explicitly uses
+`READ COMMITTED`, so the conflict query after the lock sees preceding committed
+bookings. Locks remain held until commit/rollback. Foreign-key checks and the
+original constraints remain unchanged. No exclusion constraint was introduced.
+
+This guarantee covers these API/service writers; direct SQL or future writers
+must follow the same locking protocol. Lock timeouts safely roll back rather
+than creating an unchecked booking. The coarse business lock is suitable for
+this prototype; a later high-throughput design may use finer locks or a reviewed
+database exclusion constraint. No staff hours/leave/actual-duration tracking is
+modeled yet. Planned end times remain duration snapshots, not actual checkout.
+
+Tests cover booking CRUD, walk-ins, snapshots, statuses, history, PKT date
+boundaries, pagination, tenant checks, and two independent PostgreSQL connections
+racing to create/reschedule into the same slot. Most tests roll back outer
+transactions; concurrency tests commit uniquely marked disposable fixtures so
+both connections can see them, then always run targeted cleanup. No persistent
+test appointments or accounts are retained.

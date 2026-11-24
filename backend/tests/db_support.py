@@ -24,7 +24,7 @@ class LocalPostgresTestCase(unittest.TestCase):
                 "postgresql+psycopg", "salonpulse_app", "salonpulse_dev", 5432,
             ) or url.host not in {"localhost", "127.0.0.1", "::1"}:
                 raise ValueError
-            cls.engine = create_engine(url, poolclass=NullPool, echo=False, hide_parameters=True,
+            cls.engine = create_engine(url, poolclass=NullPool, echo=False, hide_parameters=True, isolation_level="READ COMMITTED",
                                        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=5000 -c lock_timeout=3000"})
             cls.addClassCleanup(cls.engine.dispose)
             with cls.engine.connect() as connection:

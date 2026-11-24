@@ -11,7 +11,7 @@ from app.db.tenant import TenantScope
 
 
 @contextmanager
-def resource_write(session: Session):
+def resource_write(session: Session, foreign_key_detail="Resource is referenced by existing records and cannot be deleted"):
     # Authentication already opened a transaction on this request session.
     try:
         yield
@@ -28,7 +28,7 @@ def resource_write(session: Session):
         if state == "23505" and constraint in duplicates:
             raise HTTPException(409, duplicates[constraint]) from None
         if state == "23503":
-            raise HTTPException(409, "Resource is referenced by existing records and cannot be deleted") from None
+            raise HTTPException(409, foreign_key_detail) from None
         if state in {"23502", "23514"}:
             raise HTTPException(422, "Invalid resource data") from None
         raise

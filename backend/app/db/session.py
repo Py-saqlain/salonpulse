@@ -34,6 +34,7 @@ class Database:
                     engine = create_engine(
                         url,
                         pool_pre_ping=True,
+                        isolation_level="READ COMMITTED",
                         pool_size=5,
                         max_overflow=5,
                         pool_timeout=5,
