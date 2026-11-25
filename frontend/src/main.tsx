@@ -1,3 +1,6 @@
+import { AuthProvider, useAuth } from './AuthContext';
+import { AuthPage } from './AuthPage';
+import { emptyWorkspace } from './session';
 import { ServicesPage } from './ServicesPage';
 import { makeService, validateService, upcomingServiceBookings } from './services';
 import type { ServiceInput } from './services';
@@ -11,7 +14,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LayoutDashboard, CalendarDays, Users, UserRound, Scissors, ChartNoAxesCombined, Plus, Clock3, Menu, X, Sparkles, Banknote, CalendarCheck, MapPin, ChevronRight, Leaf } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { formatPKR, formatTime, lahoreDate, startsAt, loadStore, makeAppointment, validateBooking, STORAGE_KEY } from './data';
+import { formatPKR, formatTime, lahoreDate, startsAt, makeAppointment, validateBooking } from './data';
 import { AppointmentForm } from './AppointmentForm';
 import type { Page, Appointment, BookingInput, DemoStore } from './data';
 import './styles.css';
@@ -46,8 +49,8 @@ function KpiCard({ label, value, detail, icon }: { label: string; value: string;
   return <article className="kpi"><div className="flex items-center justify-between gap-3"><p>{label}</p><span className="kpi-icon"><Icon icon={icon} /></span></div><strong className="kpi-value">{value}</strong><span className="kpi-detail">{detail}</span></article>;
 }
 function App() {
-  const [initial] = useState(loadStore);
-  const [store, setStore] = useState(initial.store);
+  const { session, logout } = useAuth();
+  const [store, setStore] = useState(emptyWorkspace);
   const customers = store.customers;
   const staff = store.staff;
   const services = store.services;
@@ -55,7 +58,7 @@ function App() {
     const customer = customers.find(customer => customer.id === item.customerId)!;
     return { ...item, staff: staff.find(member => member.id === item.staffId)?.name ?? item.staff, customer: customer.name, initials: customer.name.split(' ').map(part => part[0]).join('') };
   });
-  const [storageWarning, setStorageWarning] = useState(initial.warning);
+  const [storageWarning, setStorageWarning] = useState('');
   const [editing, setEditing] = useState<Appointment | undefined>();
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -73,8 +76,6 @@ function App() {
   const remainingToday = todaysAppointments.filter(item => startsAt(item) >= now && item.status !== 'Completed' && item.status !== 'Cancelled').length;
   const revenue = todaysAppointments.filter(item => item.status === 'Completed').reduce((sum, item) => sum + item.price, 0);
   function persistStore(next: DemoStore): string | null {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); }
-    catch { return 'Browser storage is unavailable or full. Nothing was saved. Enable site storage or free some space and try again.'; }
     setStore(next); setStorageWarning(''); setNow(Date.now()); setNotice(true);
     return null;
   }
@@ -146,22 +147,24 @@ function App() {
     return () => window.removeEventListener('keydown', close);
   }, [menuOpen]);
   const active = navigation.find(item => item.id === page)!;
+  if (!session) return null;
+  const { user, business } = session;
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
     {menuOpen && <button className="nav-overlay" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`} id="navigation" inert={mobile && !menuOpen}>
       <a className="brand" href="#dashboard"><span className="brand-icon"><Icon icon={Scissors} size={25} /></span>Salon<span className="brand-light">Pulse</span></a>
-      <div className="workspace"><span className="workspace-icon"><Icon icon={Leaf} /></span><div><strong>The Grooming Studio</strong><span><Icon icon={MapPin} size={13} /> Gulberg, Lahore</span></div><span className="demo-tag">Demo</span></div>
+      <div className="workspace"><span className="workspace-icon"><Icon icon={Leaf} /></span><div><strong>{business.name}</strong><span><Icon icon={MapPin} size={13} /> {business.timezone}</span></div><span className="demo-tag">Demo</span></div>
       <p className="nav-caption">WORKSPACE</p>
       <nav aria-label="Main navigation">{navigation.map(item => <a key={item.id} href={`#${item.id}`} onClick={() => setMenuOpen(false)} className={`nav-item ${page === item.id ? 'nav-active' : ''}`} aria-current={page === item.id ? 'page' : undefined}><Icon icon={item.icon} /><span>{item.label}</span>{item.id === 'appointments' && <span className="nav-count">{appointments.length}</span>}</a>)}</nav>
-      <div className="sidebar-bottom"><div className="demo-note"><Icon icon={Sparkles} /><strong>A little more flow.<br />A lot less busywork.</strong><p>Your salon, beautifully organised.</p></div><div className="owner"><span className="avatar owner-avatar">AR</span><div><strong>Ahmed Raza</strong><span>Salon owner | Demo profile</span></div></div></div>
+      <div className="sidebar-bottom"><div className="demo-note"><Icon icon={Sparkles} /><strong>A little more flow.<br />A lot less busywork.</strong><p>Your salon, beautifully organised.</p></div><div className="owner"><span className="avatar owner-avatar" aria-hidden="true">{user.full_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2)}</span><div><strong>{user.full_name}</strong><span>{user.role === 'owner' ? 'Salon owner' : 'Team member'}</span></div></div></div>
     </aside>
     <div className="workspace-main">
-      <header className="topbar"><div className="flex items-center gap-3"><button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon icon={menuOpen ? X : Menu} /></button><span className="breadcrumb">Workspace <ChevronRight size={14} aria-hidden="true" /> <strong>{active.label}</strong></span></div><span className="preview-badge"><span /> Demo workspace</span></header>
+      <header className="topbar"><div className="flex items-center gap-3"><button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon icon={menuOpen ? X : Menu} /></button><span className="breadcrumb">Workspace <ChevronRight size={14} aria-hidden="true" /> <strong>{active.label}</strong></span></div><div className="session-account"><span className="session-account-name">{user.full_name}</span><button className="account-logout" onClick={logout}>Log out</button></div></header>
       <main id="main-content" tabIndex={-1}>
-        <div className="page-heading"><div><p className="eyebrow">YOUR SALON AT A GLANCE</p><h1>{page === 'dashboard' ? 'A good day starts here.' : active.label}</h1><p className="page-description">{page === 'dashboard' ? 'Welcome back, Ahmed. Your salon today.' : 'A little more clarity for your everyday workflow.'}</p></div><button className="primary-button" onClick={() => { setEditing(undefined); setFormOpen(true); }}><Icon icon={Plus} size={18} /> New appointment</button></div>
-        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Mock data preview.</strong> Demo services, staff, customers and bookings saved only in this browser, never to a backend.</span></div>
-        {notice && <div role="status" className="action-notice"><span>Demo changes saved to this browser. Local demo data only.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
+        <div className="page-heading"><div><p className="eyebrow">YOUR SALON AT A GLANCE</p><h1>{page === 'dashboard' ? 'A good day starts here.' : active.label}</h1><p className="page-description">{page === 'dashboard' ? `Welcome back, ${user.full_name.split(/\s+/)[0]}. Your salon today.` : 'A little more clarity for your everyday workflow.'}</p></div><button className="primary-button" onClick={() => { setEditing(undefined); setFormOpen(true); }}><Icon icon={Plus} size={18} /> New appointment</button></div>
+        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Session-only demo.</strong> Your account is connected. Salon records below are temporary and start empty each login. They are not saved to the backend and clear on logout or refresh.</span></div>
+        {notice && <div role="status" className="action-notice"><span>Demo changes kept for this session only. They clear on logout or refresh.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
         {storageWarning && <p className="action-notice" role="alert">{storageWarning}</p>}
         {page === 'dashboard' ? <>
           <div className="section-date"><span><Icon icon={CalendarDays} size={17} /> {new Intl.DateTimeFormat('en-PK', { timeZone: 'Asia/Karachi', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now)}</span><span>Today | Lahore (PKT, UTC+05:00)</span></div>
@@ -171,7 +174,7 @@ function App() {
             <KpiCard label="Total customers" value={String(customers.length)} detail="Customers in your demo directory" icon={Users} />
             <KpiCard label="Upcoming appointments" value={String(upcoming)} detail="Future demo bookings across all dates" icon={Clock3} />
           </section>
-          <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} local demo appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary"><span className="avatar">AR</span><span className="avatar">SM</span><span className="avatar">BH</span><span>{staff.filter(member => member.active).length} team members<br /><strong>active in the demo directory</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
+          <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} local demo appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary">{staff.filter(member => member.active).slice(0, 3).map(member => <span className="avatar" key={member.id} aria-hidden="true">{member.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2)}</span>)}<span>{staff.filter(member => member.active).length} team members<br /><strong>active in the demo directory</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
         </> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={saveStaff} now={now} /> : page === 'services' ? <ServicesPage services={services} appointments={appointments} onSave={saveService} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
         <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Frontend preview | Mock data only</span></footer>
       </main>
@@ -179,5 +182,20 @@ function App() {
     {formOpen && <AppointmentForm services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
   </div>;
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+function AuthGate() {
+  const { session } = useAuth();
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = () => {
+      const value = window.location.hash;
+      if (!session && value !== '#login' && value !== '#register') window.location.replace('#login');
+      else if (session && (value === '#login' || value === '#register' || !value)) window.location.replace('#dashboard');
+      setHash(window.location.hash);
+    };
+    update(); window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, [session]);
+  return session ? <App key={session.key} /> : <AuthPage key={hash === '#register' ? 'register' : 'login'} register={hash === '#register'} />;
+}
+createRoot(document.getElementById('root')!).render(<StrictMode><AuthProvider><AuthGate /></AuthProvider></StrictMode>);
 

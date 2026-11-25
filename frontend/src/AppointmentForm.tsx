@@ -42,7 +42,7 @@ export function AppointmentForm({ appointments, onSave, onClose, editing, custom
   }
   return <dialog ref={dialog} className="booking-dialog" aria-labelledby="booking-title" aria-describedby="booking-description" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="booking-heading"><div><span className="eyebrow">LOCAL DEMO BOOKING</span><h2 id="booking-title">{editing ? 'Edit appointment' : 'New appointment'}</h2></div><button type="button" className="icon-button" aria-label="Close appointment form" onClick={onClose}><X size={20} /></button></div>
-    <p id="booking-description" className="booking-description">Saved only in this browser. No backend storage. All times are Lahore time (PKT, UTC+05:00).</p>
+    <p id="booking-description" className="booking-description">Session-only demo; cleared on logout or refresh. No backend storage. All times are Lahore time (PKT, UTC+05:00).</p>
     <div hidden={!addingCustomer}>{addingCustomer && <CustomerEditor onSave={onSaveCustomer} onDone={customer => { setAddingCustomer(false); if (customer) update('customerId', customer.id); }} />}</div>
     <form onSubmit={submit} hidden={addingCustomer}>
       <div className="booking-fields"><fieldset className="booking-type"><legend>Appointment type</legend>{(['Scheduled', 'Walk-in'] as const).map(type => <label key={type}><input type="radio" name="bookingType" value={type} checked={(input.bookingType ?? 'Scheduled') === type} onChange={() => chooseType(type)} />{type}</label>)}</fieldset>{input.bookingType === 'Walk-in' && <p className="walkin-note">Start time is prefilled for the next minute in Lahore. Adjust it if the customer needs to wait; staff availability is checked on save.</p>}
