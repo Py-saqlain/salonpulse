@@ -1,8 +1,8 @@
 # SalonPulse frontend
 
 React + TypeScript + Vite with Tailwind. Authentication uses the FastAPI backend;
-the existing Dashboard, Appointments, Customers, Staff and Services UI remains a
-**session-only demo**, with no business-resource API calls yet.
+Customers, Staff and Services use authenticated API-backed CRUD. Appointments,
+visit history, staff appointment counts and revenue remain a **session-only preview**.
 
 ## Windows PowerShell
 
@@ -33,7 +33,7 @@ Use HTTPS for deployed frontend and backend URLs.
 ## Authentication contracts
 
 - `#/register`: POST `/api/auth/register` with `business_name`, `full_name`,
-  `email`, `password` (12?128 characters). Role and business identity are assigned
+  `email`, `password` (12-128 characters). Role and business identity are assigned
   by the backend. Successful registration is followed by JSON login.
 - `#/login`: POST `/api/auth/login` with `email`, `password`; the response contains
   `access_token` and `token_type: bearer`.
@@ -51,23 +51,52 @@ network handling, safe server errors and inline 422 validation. Requests omit
 cookies, refuse redirects and prohibit external request paths. The context guards
 late responses from earlier sessions from restoring a logged-out account.
 
-## Demo isolation and retained UI
+## Business directories and session isolation
 
-Every login mounts a new empty workspace. No legacy `salonpulse.demo.*` data is
-read, migrated or copied into authenticated accounts. Old browser data remains
-untouched but inaccessible through this UI. Demo edits live only in React state
-and clear on logout or refresh, including when logging back into the same account.
-Account/business labels come from the backend, and all temporary resource data
-is clearly labeled. Add demo customers, staff and services to exercise the existing
-booking/history workflow. No seeded people or business records are shown as real.
+The shared `useCatalog` hook loads `/api/customers`, `/api/staff`, `/api/services`
+using server UUIDs and tenant-checked response records. It follows all backend
+100-record pages; screens search/filter the complete loaded directory and display
+20 records per UI page. This preserves global search and complete appointment
+selectors until server-side search is available. Loading all records is a prototype
+scaling limitation; large directories need backend search and cursor pagination.
+If pagination changes mid-load, the UI requests a refresh rather than merging an
+inconsistent list. Refresh and window focus reload data; no background polling.
+Focus refresh is deferred while a customer, staff, service or appointment-preview
+editor is mounted, preserving drafts and inline feedback when returning from a
+native confirmation dialog or another window. Closing the editor permits the next
+focus refresh; the explicit Refresh directories action still reloads immediately.
 
-Existing resource editors, stable IDs, validation, staff hours, service snapshots,
-appointment conflicts, customer history, filters and responsive navigation remain.
-These demo controls do not grant backend permissions or persist salon records;
-real resource CRUD integration and role-aware resource controls are future tasks.
-The demo scheduling UI still uses Lahore time; other timezones require later mapping.
-Legacy storage/migration helpers remain in `data.ts` for existing tests, but the
-application no longer calls them. Staff is separate from an authenticated user.
+Create/edit/delete operations use POST/PATCH/DELETE. Mutations reload shared data,
+show loading/errors, and prevent concurrent form submissions. Blank nullable
+fields map to null; hours retain Sunday=0 and use the business timezone. Service
+`minutes` maps to `duration_minutes`; Decimal prices are returned as strings and
+sent with exactly two decimal places. The verified API/database maximum is PKR
+9,999,999,999.99 (`NUMERIC(12,2)`); negative, nonfinite and excess-precision values
+are rejected. Name/specialty limits are 200, notes 4,000, category 100, description
+2,000 characters. Existing phone and availability validation remains.
+
+Owners manage all three directories. Staff users manage customers and see staff
+and service directories read-only; the backend authorizes every request. Deletes
+require confirmation and referenced records return a conflict. Deactivation with
+active bookings first receives the backend warning; explicit confirmation retries
+with `confirm_upcoming: true`. Cancelling the dialog leaves the record unchanged.
+Hours changes that conflict with real appointments remain rejected. Local preview
+references also protect records from deletion without changing real bookings.
+
+No legacy `salonpulse.demo.*` storage is read or imported. Catalogs are cleared
+on logout and fetched anew after login, so database records persist across sessions
+without browser storage. In-flight reads are aborted/versioned and old session
+results cannot hydrate another account. Failed refreshes hide stale directories
+until retry. A successful write followed by failed reload may already be saved;
+refresh before submitting it again. Tokens still live only in memory.
+
+Appointment creation/edit/history remains the existing local preview, using the
+same live directory UUIDs and saved price/duration snapshots. Quick Add Customer
+inside that form saves a real customer and selects its UUID. Preview bookings
+clear on logout/refresh and never call appointment APIs. Counts/history are labeled
+as previews, not complete backend history. Full appointment integration is next.
+Local preview scheduling still uses Lahore time; real staff hours display the
+business timezone. No new dependencies or backend/schema changes are required.
 
 ## Verification
 
@@ -90,3 +119,11 @@ for guarded database checks and cleanup, accepts only local `salonpulse_dev` as
 Passwords are generated in memory and never logged. It verifies live auth forms,
 422 errors, loading, duplicate registration, account isolation, expiry, refresh,
 network errors, a simulated protected 401, mobile navigation and overflow.
+
+Run `node tests/browser-auth.mjs --crud` with the same Chrome CDP setup for live
+CRUD verification. It creates two uniquely marked businesses, tests real forms,
+HTTP tenant isolation, staff permissions, price bounds, persistence, pagination,
+network failure and deactivation/deletion constraints. Its guarded fixture helper
+changes only its temporary user role and creates one temporary appointment to
+exercise reference restrictions; it always cleans up those businesses and restores
+the database record-ID baseline. It does not implement frontend appointment APIs.

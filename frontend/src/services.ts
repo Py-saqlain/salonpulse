@@ -1,4 +1,4 @@
-﻿import type { Appointment } from './data';
+import type { Appointment } from './data';
 export type Service = { id: string; name: string; category: string; description: string; minutes: number; price: number; active: boolean };
 export type ServiceInput = Omit<Service, 'id'>;
 export const seedServices: Service[] = [
@@ -11,9 +11,9 @@ export const seedServices: Service[] = [
 export const normalizeServiceName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 export function validateService(input: ServiceInput, services: Service[], excludeId?: string): string | null {
   if (!input.name.trim()) return 'Enter a service name.';
-  if (input.name.trim().length > 100 || input.category.length > 100 || input.description.length > 2000) return 'Use up to 100 characters for name/category and 2,000 for description.';
+  if (input.name.trim().length > 200 || input.category.length > 100 || input.description.length > 2000) return 'Use up to 200 characters for the name, 100 for category and 2,000 for description.';
   if (!Number.isSafeInteger(input.minutes) || input.minutes <= 0 || input.minutes > 1440) return 'Duration must be a whole number from 1 to 1,440 minutes.';
-  if (!Number.isFinite(input.price) || input.price < 0 || input.price > 10000000 || Math.abs(input.price * 100 - Math.round(input.price * 100)) > 0.000001) return 'Price must be between PKR 0 and 10,000,000, with at most two decimal places.';
+  if (!Number.isFinite(input.price) || input.price < 0 || input.price > 9999999999.99 || Number(input.price.toFixed(2)) !== input.price) return 'Price must be between PKR 0 and 9,999,999,999.99, with at most two decimal places.';
   if (typeof input.active !== 'boolean') return 'Choose an active status.';
   if (input.active && services.some(service => service.active && service.id !== excludeId && normalizeServiceName(service.name) === normalizeServiceName(input.name))) return 'An active service already uses this name. Choose a different name or edit the existing service.';
   return null;

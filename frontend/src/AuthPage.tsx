@@ -58,7 +58,7 @@ export function AuthPage({ register }: { register: boolean }) {
         </fieldset>
       </form>
       <p className="auth-switch">{register ? 'Already have an account?' : 'New to SalonPulse?'} {' '}<a aria-disabled={auth.busy} href={register ? '#login' : '#register'} onClick={event => { if (auth.busy) event.preventDefault(); }}>{register ? 'Log in' : 'Create an account'}</a></p>
-      <p className="auth-footnote">For your privacy, this session ends when you refresh or close this page. Salon records are still a session-only demo.</p>
+      <p className="auth-footnote">For your privacy, this session ends when you refresh or close this page. Appointments remain a session-only preview.</p>
     </section>
   </main>;
 }

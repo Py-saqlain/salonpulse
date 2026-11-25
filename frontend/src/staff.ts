@@ -7,7 +7,7 @@ export type StaffInput = Omit<Staff, 'id'>;
 export const seedStaff: Staff[] = ['Ali Raza', 'Sana Malik', 'Bilal Hassan'].map((name, i) => ({ id: `staff-${i}`, name, phone: '', specialty: ['Barber', 'Colour & skin care', 'Hair stylist'][i], active: true, hours: weekdays.map((_, day) => ({ day, start: '09:00', end: '20:00' })) }));
 export function validateStaff(input: StaffInput, staff: Staff[], excludeId?: string): string | null {
   if (!input.name.trim()) return 'Enter an employee name.';
-  if (input.name.trim().length > 100 || input.specialty.length > 100) return 'Use up to 100 characters for name and specialty.';
+  if (input.name.trim().length > 200 || input.specialty.length > 200) return 'Use up to 200 characters for name and specialty.';
   const phone = normalizePhone(input.phone);
   if (phone === null) return 'Enter a valid Pakistani mobile, for example 0300 1234567.';
   if (phone && staff.some(item => item.id !== excludeId && item.phone === phone)) return 'This mobile number already belongs to a staff member.';

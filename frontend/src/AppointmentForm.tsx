@@ -40,7 +40,7 @@ export function AppointmentForm({ appointments, onSave, onClose, editing, custom
     const message = validateBooking(input, appointments, Date.now(), editing?.id, customers, staff, services) ?? onSave(input);
     if (message) { setError(message); requestAnimationFrame(() => errorRef.current?.focus()); }
   }
-  return <dialog ref={dialog} className="booking-dialog" aria-labelledby="booking-title" aria-describedby="booking-description" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+  return <dialog data-catalog-editor ref={dialog} className="booking-dialog" aria-labelledby="booking-title" aria-describedby="booking-description" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="booking-heading"><div><span className="eyebrow">LOCAL DEMO BOOKING</span><h2 id="booking-title">{editing ? 'Edit appointment' : 'New appointment'}</h2></div><button type="button" className="icon-button" aria-label="Close appointment form" onClick={onClose}><X size={20} /></button></div>
     <p id="booking-description" className="booking-description">Session-only demo; cleared on logout or refresh. No backend storage. All times are Lahore time (PKT, UTC+05:00).</p>
     <div hidden={!addingCustomer}>{addingCustomer && <CustomerEditor onSave={onSaveCustomer} onDone={customer => { setAddingCustomer(false); if (customer) update('customerId', customer.id); }} />}</div>

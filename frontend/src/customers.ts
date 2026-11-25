@@ -14,10 +14,10 @@ export function normalizePhone(phone: string): string | null {
 }
 export function validateCustomer(input: CustomerInput, customers: Customer[], excludeId?: string): string | null {
   if (!input.name.trim()) return 'Enter a customer name.';
-  if (input.name.trim().length > 100 || input.notes.length > 2000) return 'Use up to 100 characters for the name and 2,000 for notes.';
+  if (input.name.trim().length > 200 || input.notes.length > 4000) return 'Use up to 200 characters for the name and 4,000 for notes.';
   const phone = normalizePhone(input.phone);
   if (phone === null) return 'Enter a Pakistani mobile number, such as 0300 1234567 or +92 300 1234567.';
-  if (phone && customers.some(customer => customer.id !== excludeId && customer.phone === phone)) return 'This mobile number already belongs to a customer in this demo business.';
+  if (phone && customers.some(customer => customer.id !== excludeId && customer.phone === phone)) return 'This mobile number already belongs to a customer in this business.';
   return null;
 }
 export function createCustomer(input: CustomerInput, customers: Customer[], id = crypto.randomUUID()): Customer {

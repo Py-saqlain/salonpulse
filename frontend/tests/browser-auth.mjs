@@ -44,6 +44,7 @@ finally: engine.dispose()
 
 const baseline = database();
 let socket;
+let pageId;
 let sequence = 0;
 const pending = new Map();
 const calls = [];
@@ -55,7 +56,7 @@ async function command(method, params = {}) {
   const id = ++sequence;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('Browser command timeout: ' + method)); }, 20000);
-    pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
+    pending.set(id, { resolve, reject, timer, method }); socket.send(JSON.stringify({ id, method, params }));
   });
 }
 async function evaluate(expression) {
@@ -66,7 +67,12 @@ async function evaluate(expression) {
 async function wait(expression, label) {
   const until = Date.now() + 20000;
   while (Date.now() < until) {
-    if (await evaluate(expression)) return;
+    try { if (await evaluate(expression)) return; }
+    catch (error) {
+      // A fresh navigation briefly replaces the execution context. Retry only
+      // that CDP lifecycle condition, never an application script exception.
+      if (!error.navigationContextUnavailable) throw error;
+    }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error('Browser condition timed out: ' + label);
@@ -86,16 +92,25 @@ async function login(account) {
 }
 
 try {
-  const pages = await (await fetch('http://127.0.0.1:9223/json/list')).json();
-  const page = pages.find(item => item.type === 'page');
-  if (!page) throw new Error('No browser page available');
+  // Own a fresh tab rather than attaching to a prior test's navigating target.
+  const response = await fetch('http://127.0.0.1:9223/json/new?about:blank', { method: 'PUT' });
+  if (!response.ok) throw new Error('Could not create a fresh verification tab');
+  const page = await response.json(); pageId = page.id;
   socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   socket.onmessage = event => {
     const data = JSON.parse(event.data);
     if (data.id) {
       const request = pending.get(data.id);
-      if (request) { clearTimeout(request.timer); pending.delete(data.id); data.error ? request.reject(new Error('Browser command failed: ' + data.id)) : request.resolve(data.result); }
+      if (request) {
+        clearTimeout(request.timer); pending.delete(data.id);
+        if (data.error) {
+          const error = new Error(`Browser command failed: ${request.method} (${data.error.code})`);
+          error.navigationContextUnavailable = request.method === 'Runtime.evaluate' && data.error.code === -32000
+            && /context|active page/i.test(data.error.message);
+          request.reject(error);
+        } else request.resolve(data.result);
+      }
     } else if (data.method === 'Network.requestWillBeSent' && data.params.request.url.startsWith('http://127.0.0.1:8000/')) {
       calls.push(new URL(data.params.request.url).pathname);
     } else if (data.method === 'Network.responseReceived' && data.params.response.url.startsWith('http://127.0.0.1:8000/')) {
@@ -112,12 +127,19 @@ try {
   };
   await command('Runtime.enable'); await command('Page.enable'); await command('Network.enable');
   await command('Emulation.setDeviceMetricsOverride', { width: 1365, height: 900, deviceScaleFactor: 1, mobile: false });
-  await command('Page.navigate', { url: 'http://127.0.0.1:5173/#customers' });
-  await command('Page.reload');
-  await wait('!!document.querySelector(".auth-form")', 'protected route');
+  const navigation = await command('Page.navigate', { url: 'http://127.0.0.1:5173/#customers' });
+  if (navigation.errorText) throw new Error('Frontend navigation failed: ' + navigation.errorText);
+  // Reloading immediately after navigate races Chrome's active-page swap.
+  await wait('location.origin==="http://127.0.0.1:5173" && document.readyState!=="loading" && !!document.querySelector(".auth-form")', 'protected route');
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
+  if (process.argv.includes('--crud')) {
+    const { verifyCrud } = await import('./browser-crud.mjs');
+    await verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls });
+    check(exceptions === 0, 'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live CRUD browser checks.`);
+  } else {
   await route('register');
   await submit({ ...accounts[0], email: 'invalid@localhost' });
   await wait('!!document.querySelector("input[name=email][aria-invalid=true]")', 'inline backend validation');
@@ -148,7 +170,8 @@ try {
   await route('register'); await submit(accounts[1]); await wait('!!document.querySelector("[role=alert]")', 'duplicate registration');
   check(await evaluate('document.querySelector("[role=alert]").textContent.includes("already registered")'), 'Duplicate registration handling');
   await login(accounts[0]);
-  check(await evaluate('!document.body.textContent.includes("SESSION A PRIVATE CUSTOMER")'), 'Workspace not reset on login');
+  await evaluate('location.hash="customers"'); await wait('!!document.querySelector(".customer-page")', 'persisted directory');
+  check(await evaluate('document.body.textContent.includes("SESSION A PRIVATE CUSTOMER")'), 'Saved customer did not persist across login');
   await evaluate('window.__originalNow=Date.now; Date.now=()=>window.__originalNow()+31*60*1000; window.dispatchEvent(new Event("focus"))');
   await wait('!!document.querySelector(".auth-form")', 'expiry logout');
   check(await evaluate('document.body.textContent.includes("expired")'), 'Expiry message missing');
@@ -173,16 +196,24 @@ try {
   const mobile = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(tmpdir(), 'salonpulse-auth-mobile.png'), Buffer.from(mobile.data, 'base64'));
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile auth horizontal overflow');
-  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me'].includes(path)), 'Unexpected business-resource API calls');
+  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services'].includes(path)), 'Unexpected business-resource API calls');
   check(exceptions === 0, 'Browser runtime exceptions');
   console.log(`PASS: ${checks} live browser checks; desktop/mobile, registration, login, logout, refresh, expiry, 401, network errors, duplicates and tenant/demo isolation.`);
+  }
 } catch (error) {
   // Never dump browser protocol data, requests, passwords or tokens.
   console.error('FAIL:', error instanceof Error ? error.message : 'Browser verification failed'); process.exitCode = 1;
+  if (socket?.readyState === WebSocket.OPEN) {
+    try {
+      const state = await evaluate(`JSON.stringify({route:location.hash, editorOpen:!!document.querySelector('.customer-edit-panel'), alerts:[...document.querySelectorAll('main [role=alert]')].map(item=>item.textContent), statuses:[...document.querySelectorAll('article.customer-card .status')].map(item=>item.textContent), loading:document.querySelector('.directory-toolbar button')?.disabled})`);
+      console.error('Safe UI diagnostics:', state);
+    } catch { console.error('UI diagnostics unavailable during navigation.'); }
+  }
   console.error('HTTP status diagnostics:', JSON.stringify(responses));
 } finally {
   socket?.close();
   for (const request of pending.values()) clearTimeout(request.timer);
+  if (pageId) await fetch('http://127.0.0.1:9223/json/close/' + pageId);
   const after = database(true);
   if (after !== baseline) { console.error('FAIL: Database baseline mismatch after cleanup'); process.exitCode = 1; }
   else console.log('PASS: Temporary businesses/accounts cleaned up; all six tables restored to baseline.');

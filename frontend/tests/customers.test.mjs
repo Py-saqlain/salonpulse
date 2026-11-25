@@ -183,8 +183,21 @@ test('service creation trims optional fields and assigns stable IDs', () => {
 test('service validation rejects missing names and invalid numbers', () => {
   assert.ok(validateService({ ...serviceInput, name: ' ' }, []));
   for (const minutes of [0, -1, NaN, Infinity, 1.5, 1441]) assert.ok(validateService({ ...serviceInput, minutes }, []));
-  for (const price of [-1, NaN, Infinity, 1.001, 10000001]) assert.ok(validateService({ ...serviceInput, price }, []));
+  for (const price of [-1, -0.01, NaN, Infinity, 1.001, 9999999999.991, 10000000000]) assert.ok(validateService({ ...serviceInput, price }, []));
   assert.equal(validateService({ ...serviceInput, price: 1250.25 }, []), null);
+  for (const price of [0, 0.01, 10000001, 9999999999.98, 9999999999.99]) assert.equal(validateService({ ...serviceInput, price }, []), null);
+});
+
+test('directory text limits match backend contracts without weakening required fields', () => {
+  assert.equal(validateCustomer({ ...input, name: 'n'.repeat(200), notes: 'n'.repeat(4000) }, []), null);
+  assert.ok(validateCustomer({ ...input, name: 'n'.repeat(201) }, []));
+  assert.ok(validateCustomer({ ...input, notes: 'n'.repeat(4001) }, []));
+  const member = { name: 'n'.repeat(200), phone: '', specialty: 's'.repeat(200), active: true, hours: null };
+  assert.equal(staffDomain.validateStaff(member, []), null);
+  assert.ok(staffDomain.validateStaff({ ...member, specialty: 's'.repeat(201) }, []));
+  const service = { ...serviceInput, name: 'n'.repeat(200), category: 'c'.repeat(100), description: 'd'.repeat(2000) };
+  assert.equal(validateService(service, []), null);
+  for (const changes of [{ name: 'n'.repeat(201) }, { category: 'c'.repeat(101) }, { description: 'd'.repeat(2001) }]) assert.ok(validateService({ ...service, ...changes }, []));
 });
 test('active names are unique ignoring case and whitespace, including reactivation', () => {
   const existing = makeService(serviceInput, []);
