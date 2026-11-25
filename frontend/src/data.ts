@@ -5,7 +5,7 @@ import type { Staff } from './staff';
 import { seedCustomers, normalizePhone } from './customers';
 import type { Customer } from './customers';
 export type Page = 'dashboard' | 'appointments' | 'customers' | 'staff' | 'services' | 'analytics';
-export type Appointment = { id: string; bookingType?: 'Scheduled' | 'Walk-in'; customerId: string; customer: string; initials: string; serviceId: string; service: string; staffId: string; staff: string; date: string; time: string; minutes: number; price: number; status: 'Confirmed' | 'In progress' | 'Completed' | 'Cancelled' };
+export type Appointment = { startUTC?: string; endUTC?: string; timeZone?: string; id: string; bookingType?: 'Scheduled' | 'Walk-in'; customerId: string; customer: string; initials: string; serviceId: string; service: string; staffId: string; staff: string; date: string; time: string; minutes: number; price: number; status: 'Confirmed' | 'In progress' | 'Completed' | 'Cancelled' };
 export type BookingInput = { bookingType?: 'Scheduled' | 'Walk-in'; recalculateService?: boolean; customerId: string; serviceId: string; staffId: string; date: string; time: string };
 export const STORAGE_KEY = 'salonpulse.demo.v4';
 export type DemoStore = { customers: Customer[]; staff: Staff[]; services: Service[]; appointments: Appointment[] };
@@ -15,8 +15,8 @@ export function lahoreDate(now = new Date()): string {
   const part = (type: string) => parts.find(p => p.type === type)!.value;
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
-export const startsAt = (item: { date: string; time: string }) => new Date(`${item.date}T${item.time}:00+05:00`).getTime();
-export const formatTime = (item: Appointment) => new Intl.DateTimeFormat('en-PK', { timeZone: 'Asia/Karachi', hour: 'numeric', minute: '2-digit' }).format(startsAt(item));
+export const startsAt = (item: { date: string; time: string; startUTC?: string }) => new Date(item.startUTC ?? `${item.date}T${item.time}:00+05:00`).getTime();
+export const formatTime = (item: Appointment) => new Intl.DateTimeFormat('en-PK', { timeZone: item.timeZone ?? 'Asia/Karachi', hour: 'numeric', minute: '2-digit' }).format(startsAt(item));
 export function seedAppointments(): Appointment[] {
   return seedServices.map((service, i) => ({ id: `seed-${i}`, customerId: seedCustomers[i].id, customer: seedCustomers[i].name, initials: seedCustomers[i].name.split(' ').map(n => n[0]).join(''), serviceId: service.id, service: service.name, staffId: seedStaff[[0, 1, 2, 1, 0][i]].id, staff: seedStaff[[0, 1, 2, 1, 0][i]].name, date: lahoreDate(), time: ['10:00', '11:00', '12:30', '14:00', '15:30'][i], minutes: service.minutes, price: service.price, status: i === 0 ? 'Completed' : 'Confirmed' }));
 }

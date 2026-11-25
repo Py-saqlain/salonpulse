@@ -1,18 +1,17 @@
+import { AppointmentList } from './AppointmentList';
+import { AppointmentsPage } from './AppointmentsPage';
+import { localDateTime } from './appointments';
 import { AuthProvider, useAuth } from './AuthContext';
 import { AuthPage } from './AuthPage';
 import { useCatalog } from './useCatalog';
 import { ServicesPage } from './ServicesPage';
-import { upcomingServiceBookings } from './services';
-import type { ServiceInput } from './services';
 import { StaffPage } from './StaffPage';
-import { upcomingStaffBookings } from './staff';
-import type { StaffInput } from './staff';
 import { CustomersPage } from './CustomersPage';
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LayoutDashboard, CalendarDays, Users, UserRound, Scissors, ChartNoAxesCombined, Plus, Clock3, Menu, X, Sparkles, Banknote, CalendarCheck, MapPin, ChevronRight, Leaf } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { formatPKR, formatTime, lahoreDate, startsAt, makeAppointment, validateBooking } from './data';
+import { formatPKR, startsAt } from './data';
 import { AppointmentForm } from './AppointmentForm';
 import type { Page, Appointment, BookingInput } from './data';
 import './styles.css';
@@ -32,17 +31,6 @@ function currentPage(): Page {
 function Icon({ icon: IconComponent, size = 20 }: { icon: LucideIcon; size?: number }) {
   return <IconComponent size={size} aria-hidden="true" strokeWidth={1.8} />;
 }
-function AppointmentList({ appointments, showDates = false, onEdit, onStatus }: { appointments: Appointment[]; showDates?: boolean; onEdit?: (item: Appointment) => void; onStatus?: (item: Appointment, status: 'Cancelled' | 'Completed') => void }) {
-  if (!appointments.length) return <p className="empty-appointments">No appointments yet. Create a local demo booking to get started.</p>;
-  return <div className="appointment-list">{appointments.map(item => <article className="appointment" key={item.id}>
-    <div className="appointment-time"><strong>{formatTime(item)}</strong>{showDates && <span>{item.date}</span>}<span>{item.minutes} min</span></div>
-    <span className="avatar customer-avatar" aria-hidden="true">{item.initials}</span>
-    <div className="appointment-person"><h3>{item.customer}</h3><p>{item.service}</p><span className="booking-kind">{item.bookingType ?? 'Scheduled'}</span><span className="mobile-staff">with {item.staff}</span></div>
-    <div className="appointment-staff"><span>Team member</span><strong>{item.staff}</strong></div>
-    <div className="appointment-end"><strong>{formatPKR(item.price)}</strong><span className={`status status-${item.status.toLowerCase().replaceAll(' ', '-')}`}>{item.status}</span></div>
-    {onEdit && item.status !== 'Completed' && item.status !== 'Cancelled' && <div className="appointment-actions"><button onClick={() => onEdit(item)} aria-label={`Edit appointment for ${item.customer}`}>Edit</button><button onClick={() => onStatus?.(item, 'Completed')} aria-label={`Complete appointment for ${item.customer}`}>Complete</button><button className="cancel-booking" onClick={() => onStatus?.(item, 'Cancelled')} aria-label={`Cancel appointment for ${item.customer}`}>Cancel</button></div>}
-  </article>)}</div>;
-}
 function KpiCard({ label, value, detail, icon }: { label: string; value: string; detail: string; icon: LucideIcon }) {
   return <article className="kpi"><div className="flex items-center justify-between gap-3"><p>{label}</p><span className="kpi-icon"><Icon icon={icon} /></span></div><strong className="kpi-value">{value}</strong><span className="kpi-detail">{detail}</span></article>;
 }
@@ -50,62 +38,30 @@ function App() {
   const { session, logout } = useAuth();
   const catalog = useCatalog();
   const { customers, staff, services, saveCustomer } = catalog;
-  const [bookings, setBookings] = useState<Appointment[]>([]);
-  const appointments = bookings.map(item => {
-    const customer = customers.find(customer => customer.id === item.customerId);
-    const name = customer?.name ?? item.customer;
-    return { ...item, staff: staff.find(member => member.id === item.staffId)?.name ?? item.staff, customer: name, initials: name.split(' ').map(part => part[0]).join('') };
-  });
-  const [storageWarning, setStorageWarning] = useState('');
+  const appointments = catalog.appointments;
+  const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState<Appointment | undefined>();
-  const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer); }, []);
-  const today = lahoreDate(new Date(now));
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const today = localDateTime(now, session!.business.timezone).date;
   const sorted = [...appointments].sort((a, b) => startsAt(a) - startsAt(b));
   const todaysAppointments = sorted.filter(item => item.date === today);
   const activeToday = todaysAppointments.filter(item => item.status !== 'Cancelled');
-  const filtered = sorted.filter(item => item.customer.toLowerCase().includes(search.trim().toLowerCase()) && (!dateFilter || item.date === dateFilter) && (!statusFilter || item.status === statusFilter));
   const completed = todaysAppointments.filter(item => item.status === 'Completed').length;
   const upcoming = sorted.filter(item => startsAt(item) >= now && item.status !== 'Completed' && item.status !== 'Cancelled').length;
   const remainingToday = todaysAppointments.filter(item => startsAt(item) >= now && item.status !== 'Completed' && item.status !== 'Cancelled').length;
   const revenue = todaysAppointments.filter(item => item.status === 'Completed').reduce((sum, item) => sum + item.price, 0);
-  function persist(next: Appointment[]): string | null {
-    setBookings(next); setStorageWarning(''); setNow(Date.now()); setNotice(true); return null;
+  async function saveBooking(input: BookingInput): Promise<string | null> {
+    const error = await catalog.saveAppointment(input, editing);
+    if (!error) { setFormOpen(false); setEditing(undefined); }
+    return error;
   }
-  async function saveStaff(input: StaffInput, id?: string) {
-    if (id && !input.active && staff.find(member => member.id === id)?.active && upcomingStaffBookings(id, appointments).length
-      && !window.confirm('Deactivate this employee? Local preview bookings remain assigned and will not be cancelled.')) return 'Deactivation was not saved.';
-    return catalog.saveStaff(input, id);
-  }
-  async function saveService(input: ServiceInput, id?: string) {
-    if (id && !input.active && services.find(service => service.id === id)?.active && upcomingServiceBookings(id, appointments).length
-      && !window.confirm('Deactivate this service? Local preview bookings keep their saved price and duration.')) return 'Deactivation was not saved.';
-    return catalog.saveService(input, id);
-  }
-  async function remove(resource: 'customers' | 'staff' | 'services', id: string) {
-    if (appointments.some(item => (resource === 'customers' ? item.customerId : resource === 'staff' ? item.staffId : item.serviceId) === id)) return 'This record is referenced by a local preview appointment. Keep it for history; staff/services can be deactivated instead.';
-    return catalog.remove(resource, id);
-  }
-  function saveBooking(input: BookingInput): string | null {
-    if (!catalog.ready || catalog.loading || catalog.busy) return 'Wait for the business directories to finish loading.';
-    const error = validateBooking(input, appointments, Date.now(), editing?.id, customers, staff, services);
-    if (error) return error;
-    const booking = makeAppointment(input, customers, staff, services, editing);
-    const next = editing ? appointments.map(item => item.id === editing.id ? { ...booking, id: item.id, status: item.status } : item) : [...appointments, booking];
-    const storageError = persist(next);
-    if (storageError) return storageError;
-    setFormOpen(false); setEditing(undefined);
-    return null;
-  }
-  function changeStatus(item: Appointment, status: 'Cancelled' | 'Completed') {
-    if (item.status === 'Completed' || item.status === 'Cancelled') return;
-    if (status === 'Cancelled' && !window.confirm(`Cancel the appointment for ${item.customer} on ${item.date} at ${formatTime(item)}? This frees the staff member's time.`)) return;
-    const error = persist(appointments.map(booking => booking.id === item.id ? { ...booking, status } : booking));
-    if (error) setStorageWarning(error);
+  async function changeStatus(item: Appointment, status: 'In progress' | 'Completed' | 'Cancelled') {
+    setActionError('');
+    const value = status === 'In progress' ? 'in_progress' : status === 'Completed' ? 'completed' : 'cancelled';
+    const error = await catalog.changeAppointment(item, value);
+    if (error) setActionError(error);
   }
   const [page, setPage] = useState<Page>(currentPage);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -116,9 +72,8 @@ function App() {
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
-  const [notice, setNotice] = useState(false);
   useEffect(() => {
-    const update = () => { setPage(currentPage()); setMenuOpen(false); setNotice(false); };
+    const update = () => { setPage(currentPage()); setMenuOpen(false); };
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
@@ -145,25 +100,24 @@ function App() {
       <header className="topbar"><div className="flex items-center gap-3"><button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="navigation" onClick={() => setMenuOpen(!menuOpen)}><Icon icon={menuOpen ? X : Menu} /></button><span className="breadcrumb">Workspace <ChevronRight size={14} aria-hidden="true" /> <strong>{active.label}</strong></span></div><div className="session-account"><span className="session-account-name">{user.full_name}</span><button className="account-logout" onClick={logout}>Log out</button></div></header>
       <main id="main-content" tabIndex={-1}>
         <div className="page-heading"><div><p className="eyebrow">YOUR SALON AT A GLANCE</p><h1>{page === 'dashboard' ? 'A good day starts here.' : active.label}</h1><p className="page-description">{page === 'dashboard' ? `Welcome back, ${user.full_name.split(/\s+/)[0]}. Your salon today.` : 'A little more clarity for your everyday workflow.'}</p></div><button className="primary-button" disabled={!catalog.ready || catalog.loading || catalog.busy} onClick={() => { setEditing(undefined); setFormOpen(true); }}><Icon icon={Plus} size={18} /> New appointment</button></div>
-        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Connected business directories.</strong> Customers, staff and services are saved to your business. Appointments, visit history and revenue are still session-only previews; backend appointment integration comes next.</span></div>
-        {notice && <div role="status" className="action-notice"><span>Demo changes kept for this session only. They clear on logout or refresh.</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice(false)}><Icon icon={X} size={18} /></button></div>}
+        <div className="demo-banner"><Icon icon={Sparkles} size={17} /><span><strong>Connected workspace.</strong> Bookings and customer history are saved to your business. Times use {business.timezone}; revenue uses completed bookings and their saved prices.</span></div>
         <div className="directory-toolbar"><button className="filter-reset" disabled={catalog.loading || catalog.busy} onClick={() => void catalog.refresh()}>Refresh directories</button>{catalog.loading && <span role="status">Loading business records...</span>}{catalog.notice && !catalog.loading && <span role="status">{catalog.notice}</span>}</div>
-        {catalog.error && <p className="booking-error" role="alert">{catalog.error} Use Refresh directories to retry. A submitted change may already have been saved; refresh before submitting it again.</p>}
-        {storageWarning && <p className="action-notice" role="alert">{storageWarning}</p>}
+        {catalog.error && <p className="booking-error" role="alert">{catalog.error} Previously loaded records may be out of date. Use Refresh directories to retry. A submitted change may already have been saved; refresh before submitting it again.</p>}
+        {actionError && <p className="action-notice" role="alert">{actionError}</p>}
         {page === 'dashboard' ? <>
-          <div className="section-date"><span><Icon icon={CalendarDays} size={17} /> {new Intl.DateTimeFormat('en-PK', { timeZone: 'Asia/Karachi', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now)}</span><span>Today | Lahore (PKT, UTC+05:00)</span></div>
+          <div className="section-date"><span><Icon icon={CalendarDays} size={17} /> {new Intl.DateTimeFormat('en-PK', { timeZone: business.timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now)}</span><span>Today | {business.timezone}</span></div>
           <section aria-label="Salon key metrics" className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-4">
-            <KpiCard label="Today's appointments" value={String(activeToday.length)} detail={`${completed} completed / ${remainingToday} upcoming; cancellations excluded`} icon={CalendarCheck} />
-            <KpiCard label="Today's revenue" value={formatPKR(revenue)} detail="Completed demo appointments only" icon={Banknote} />
+            <KpiCard label="Today's appointments" value={catalog.ready ? String(activeToday.length) : "--"} detail={`${completed} completed / ${remainingToday} upcoming; cancellations excluded`} icon={CalendarCheck} />
+            <KpiCard label="Today's revenue" value={catalog.ready ? formatPKR(revenue) : "--"} detail="Completed bookings at saved prices" icon={Banknote} />
             <KpiCard label="Total customers" value={catalog.ready ? String(customers.length) : "--"} detail="Customers saved to your business" icon={Users} />
-            <KpiCard label="Upcoming appointments" value={String(upcoming)} detail="Future demo bookings across all dates" icon={Clock3} />
+            <KpiCard label="Upcoming appointments" value={catalog.ready ? String(upcoming) : "--"} detail="Future bookings across all dates" icon={Clock3} />
           </section>
-          <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} local demo appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary">{staff.filter(member => member.active).slice(0, 3).map(member => <span className="avatar" key={member.id} aria-hidden="true">{member.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2)}</span>)}<span>{staff.filter(member => member.active).length} team members<br /><strong>active in your business</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
-        </> : page !== 'appointments' && !catalog.ready ? <section className="panel empty-appointments"><h2>{catalog.loading ? 'Loading your business records...' : 'Directory unavailable'}</h2><p>{catalog.loading ? 'Please wait.' : 'Refresh the directories to try again.'}</p></section> : page === 'appointments' ? <section className="panel appointments-page"><div className="panel-heading"><div><h2>Manage appointments</h2><p>All dates | Lahore time (PKT) | Local demo schedule</p></div><span className="count-badge">{appointments.length} appointments</span></div><div className="appointment-filters"><label>Search customer<input type="search" placeholder="Customer name" value={search} onChange={e => setSearch(e.target.value)} /></label><label>Date<input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{['Confirmed', 'In progress', 'Completed', 'Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label><button className="filter-reset" onClick={() => { setSearch(''); setDateFilter(''); setStatusFilter(''); }}>Clear filters</button></div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} local demo appointments</p>{filtered.length ? <AppointmentList appointments={filtered} showDates onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={changeStatus} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Try another customer, date or status, or clear the filters.' : 'Create your first local demo appointment using New appointment.'}</p></div>}</section> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} onDelete={id => remove('customers', id)} disabled={catalog.loading || catalog.busy} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={saveStaff} now={now} onDelete={id => remove('staff', id)} owner={catalog.owner} timezone={business.timezone} disabled={catalog.loading || catalog.busy} /> : page === 'services' ? <ServicesPage services={services} appointments={appointments} onSave={saveService} onDelete={id => remove('services', id)} owner={catalog.owner} disabled={catalog.loading || catalog.busy} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
-        <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Connected directories | Local appointment preview</span></footer>
+          <div className="dashboard-columns"><section className="panel"><div className="panel-heading"><div><h2>Today's appointments</h2><p>A snapshot of your salon&#39;s schedule.</p></div><a className="text-link" href="#appointments">View schedule</a></div><AppointmentList appointments={todaysAppointments} /><div className="panel-footer">{todaysAppointments.length} saved appointments today</div></section><aside className="day-panel"><span className="day-icon"><Icon icon={Leaf} size={25} /></span><p className="eyebrow">ROOM TO SHINE</p><h2>Keep the day<br />running smoothly.</h2><p>{remainingToday} appointments ahead today. A quick look at your schedule helps everyone stay a step ahead.</p><a href="#appointments" className="secondary-button"><Icon icon={CalendarDays} size={18} /> Open schedule</a><div className="team-summary">{staff.filter(member => member.active).slice(0, 3).map(member => <span className="avatar" key={member.id} aria-hidden="true">{member.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2)}</span>)}<span>{staff.filter(member => member.active).length} team members<br /><strong>active in your business</strong></span></div><span className="day-footnote">Thoughtfully made for your everyday.</span></aside></div>
+        </> : !catalog.loaded ? <section className="panel empty-appointments"><h2>{catalog.loading ? 'Loading your business records...' : 'Records unavailable'}</h2><p>{catalog.loading ? 'Please wait.' : 'Refresh the business records to try again.'}</p></section> : page === 'appointments' ? <AppointmentsPage appointments={sorted} staff={staff} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={(item, status) => void changeStatus(item, status)} /> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} onDelete={id => catalog.remove('customers', id)} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={catalog.saveStaff} now={now} onDelete={id => catalog.remove('staff', id)} owner={catalog.owner} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'services' ? <ServicesPage services={services} appointments={appointments} onSave={catalog.saveService} onDelete={id => catalog.remove('services', id)} owner={catalog.owner} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
+        <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Connected business workspace</span></footer>
       </main>
     </div>
-    {formOpen && <AppointmentForm services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
+    {formOpen && <AppointmentForm timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
   </div>;
 }
 function AuthGate() {

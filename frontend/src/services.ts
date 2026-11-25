@@ -32,5 +32,5 @@ export function bookingService(input: { serviceId: string; recalculateService?: 
   return { name: service.name, minutes: service.minutes, price: service.price };
 }
 export function upcomingServiceBookings(id: string, appointments: Appointment[], now = Date.now()) {
-  return appointments.filter(item => item.serviceId === id && item.status !== 'Completed' && item.status !== 'Cancelled' && new Date(`${item.date}T${item.time}:00+05:00`).getTime() + item.minutes * 60000 > now);
+  return appointments.filter(item => item.serviceId === id && item.status !== 'Completed' && item.status !== 'Cancelled' && (item.endUTC ? Date.parse(item.endUTC) : new Date(`${item.date}T${item.time}:00+05:00`).getTime() + item.minutes * 60000) > now);
 }

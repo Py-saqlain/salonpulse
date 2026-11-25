@@ -9,8 +9,8 @@ import { stripTypeScriptTypes } from 'node:module';
 const directory = mkdtempSync(join(tmpdir(), 'salonpulse-catalog-'));
 let domain, ApiClient, ApiError;
 try {
-  for (const name of ['api', 'customers', 'catalog']) {
-    const code = stripTypeScriptTypes(readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')).replaceAll("'./api'", "'./api.mjs'").replaceAll("'./customers'", "'./customers.mjs'");
+  for (const name of ['api', 'customers', 'services', 'appointments', 'catalog']) {
+    const code = stripTypeScriptTypes(readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')).replaceAll("'./api'", "'./api.mjs'").replaceAll("'./customers'", "'./customers.mjs'").replaceAll("'./appointments'", "'./appointments.mjs'").replaceAll("'./services'", "'./services.mjs'");
     writeFileSync(join(directory, name + '.mjs'), code);
   }
   domain = await import(pathToFileURL(join(directory, 'catalog.mjs')));

@@ -1,3 +1,6 @@
+import { bookingPayload, validateAppointment } from './appointments';
+import type { AppointmentDTO, AppointmentStatus } from './appointments';
+import type { Appointment, BookingInput } from './data';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { checkRecord, customerFromAPI, customerToAPI, readCatalog, requiresDeactivationConfirmation, resourceError, serviceToAPI, staffToAPI } from './catalog';
@@ -9,32 +12,37 @@ import { validateStaff } from './staff';
 import type { ServiceInput } from './services';
 import { validateService } from './services';
 
-const empty = (): Catalog => ({ customers: [], staff: [], services: [] });
+const empty = (): Catalog => ({ customers: [], staff: [], services: [], appointments: [] });
 
 export function useCatalog() {
   const { api, session } = useAuth();
   const businessId = session!.business.id;
+  const zone = session!.business.timezone;
   const owner = session!.user.role === 'owner';
   const [data, setData] = useState<Catalog>(empty);
   const [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const alive = useRef(false); const writing = useRef(false);
+  const alive = useRef(false); const writing = useRef(false); const refreshing = useRef(false);
   const version = useRef(0); const controller = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
+    // Coalesce clicks/focus events before React has rendered the loading state.
+    if (!alive.current || refreshing.current) return;
+    refreshing.current = true;
     const request = ++version.current;
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    setLoading(true); setReady(false); setError('');
+    setLoading(true); setReady(false);
     try {
-      const next = await readCatalog(api, businessId, abort.signal);
-      if (alive.current && request === version.current && !abort.signal.aborted) { setData(next); setReady(true); }
+      const next = await readCatalog(api, businessId, abort.signal, zone);
+      if (alive.current && request === version.current && !abort.signal.aborted) { setData(next); setReady(true); setLoaded(true); setError(''); }
     } catch (reason) {
-      if (alive.current && request === version.current && !abort.signal.aborted) { abort.abort(); setData(empty()); setError(resourceError(reason)); }
-    } finally { if (alive.current && request === version.current) setLoading(false); }
-  }, [api, businessId]);
+      if (alive.current && request === version.current && !abort.signal.aborted) { abort.abort(); setError(resourceError(reason)); }
+    } finally { if (alive.current && request === version.current) { refreshing.current = false; setLoading(false); } }
+  }, [api, businessId, zone]);
 
   useEffect(() => {
     alive.current = true; void refresh();
@@ -46,11 +54,11 @@ export function useCatalog() {
       if (!writing.current && !editorOpen && document.visibilityState === 'visible') void refresh();
     };
     window.addEventListener('focus', focus);
-    return () => { alive.current = false; version.current++; controller.current?.abort(); window.removeEventListener('focus', focus); };
+    return () => { alive.current = false; version.current++; controller.current?.abort(); refreshing.current = false; window.removeEventListener('focus', focus); };
   }, [refresh]);
 
   async function write<T>(action: () => Promise<T>): Promise<T | string> {
-    if (!alive.current || writing.current || !ready || loading) return 'Please wait for the directory to finish loading.';
+    if (!alive.current || writing.current || refreshing.current || !ready || loading) return 'Please wait for the directory to finish loading.';
     writing.current = true; setBusy(true); setNotice('');
     try {
       const result = await action();
@@ -98,5 +106,23 @@ export function useCatalog() {
     const result = await write(async () => { await api.request<void>(`/api/${resource}/${id}`, { method: 'DELETE' }); return true; });
     return typeof result === 'string' ? result : null;
   }
-  return { ...data, loading, ready, busy, error, notice, owner, refresh, saveCustomer, saveStaff, saveService, remove };
+  async function saveAppointment(input: BookingInput, original?: Appointment) {
+    if (!ready || loading) return 'Wait for business records to finish loading.';
+    const validation = validateAppointment(input, data, zone, original); if (validation) return validation;
+    const body = bookingPayload(input, zone, original); if (body === null) return null;
+    const result = await write(async () => {
+      checkRecord(await api.request<AppointmentDTO>(`/api/appointments${original ? '/' + original.id : ''}`, { method: original ? 'PATCH' : 'POST', body }), businessId);
+      return true;
+    });
+    return typeof result === 'string' ? result : null;
+  }
+  async function changeAppointment(item: Appointment, status: AppointmentStatus) {
+    if (status === 'cancelled' && !window.confirm('Cancel this appointment? It remains in customer history and the staff slot becomes available.')) return null;
+    const result = await write(async () => {
+      await api.request(`/api/appointments/${item.id}`, status === 'cancelled' ? { method: 'DELETE' } : { method: 'PATCH', body: { status } });
+      return true;
+    });
+    return typeof result === 'string' ? result : null;
+  }
+  return { ...data, loading, ready, loaded, busy, error, notice, owner, refresh, saveCustomer, saveStaff, saveService, remove, saveAppointment, changeAppointment };
 }

@@ -48,6 +48,7 @@ let pageId;
 let sequence = 0;
 const pending = new Map();
 const calls = [];
+const traffic = [];
 const responses = [];
 let exceptions = 0;
 let checks = 0;
@@ -113,6 +114,7 @@ try {
       }
     } else if (data.method === 'Network.requestWillBeSent' && data.params.request.url.startsWith('http://127.0.0.1:8000/')) {
       calls.push(new URL(data.params.request.url).pathname);
+      traffic.push({ path: new URL(data.params.request.url).pathname, method: data.params.request.method });
     } else if (data.method === 'Network.responseReceived' && data.params.response.url.startsWith('http://127.0.0.1:8000/')) {
       responses.push({ path: new URL(data.params.response.url).pathname, status: data.params.response.status });
     } else if (data.method === 'Runtime.exceptionThrown') exceptions++;
@@ -134,9 +136,14 @@ try {
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--crud')) {
+  if (process.argv.includes('--appointments')) {
+    const { verifyAppointments } = await import('./browser-appointments.mjs');
+    await verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic });
+    check(exceptions === 0, 'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live appointment browser checks.`);
+  } else if (process.argv.includes('--crud')) {
     const { verifyCrud } = await import('./browser-crud.mjs');
-    await verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls });
+    await verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic });
     check(exceptions === 0, 'Browser runtime exceptions');
     console.log(`PASS: ${checks} live CRUD browser checks.`);
   } else {
@@ -196,7 +203,7 @@ try {
   const mobile = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(tmpdir(), 'salonpulse-auth-mobile.png'), Buffer.from(mobile.data, 'base64'));
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile auth horizontal overflow');
-  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services'].includes(path)), 'Unexpected business-resource API calls');
+  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services','/api/appointments'].includes(path)), 'Unexpected business-resource API calls');
   check(exceptions === 0, 'Browser runtime exceptions');
   console.log(`PASS: ${checks} live browser checks; desktop/mobile, registration, login, logout, refresh, expiry, 401, network errors, duplicates and tenant/demo isolation.`);
   }

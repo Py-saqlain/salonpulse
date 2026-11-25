@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls }) {
+export async function verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic }) {
   let acceptDialogs = true; let dialogs = 0;
   socket.addEventListener('message', event => {
     const message = JSON.parse(event.data);
@@ -186,13 +186,32 @@ finally: engine.dispose()
   await click('Refresh directories'); await logout(); await login(accounts[1]); await ready();
   await command('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await navigate('customers'); await see('Customer B'); check(await evaluate('!document.body.textContent.includes("Customer A")'), 'Stale responses crossed accounts');
+  await edit('customers', 'Customer B', 'Edit customer');
+  await set('.customer-editor input[autocomplete=name]', 'Unsaved recovery draft');
+  await set('.customer-editor textarea', 'Notes survive failed refresh and retry');
+  await set('.customer-editor input[type=tel]', 'invalid-number'); await submitEditor();
+  await wait('document.querySelector(".customer-editor [role=alert]")?.textContent.includes("Pakistani")', 'draft validation feedback');
+  const editorSnapshot = `JSON.stringify({name:document.querySelector('.customer-editor input[autocomplete=name]').value,notes:document.querySelector('.customer-editor textarea').value,phone:document.querySelector('.customer-editor input[type=tel]').value,error:document.querySelector('.customer-editor [role=alert]').textContent})`;
+  const recoveryDraft = await evaluate(editorSnapshot);
   await command('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await click('Refresh directories'); await wait('document.querySelector("main [role=alert]")?.textContent.includes("Cannot reach")', 'network failure');
-  check(await evaluate('!document.querySelector("article.customer-card")'), 'Stale records shown after failed refresh');
+  await wait('document.querySelector(".directory-toolbar button")?.disabled===false', 'retry is available after failure');
+  check(await evaluate(`!!(${card('Customer B')}) && (${card('Customer B')}).querySelector('.cancel-booking').disabled`), 'Cached data preserved with mutations disabled');
+  check(await evaluate(editorSnapshot) === recoveryDraft, 'Failed refresh preserved editor values and feedback');
+  await command('Network.emulateNetworkConditions', { offline: false, latency: 250, downloadThroughput: -1, uploadThroughput: -1 });
+  const beforeRetry = traffic.length;
+  await evaluate('(()=>{const button=document.querySelector(".directory-toolbar button");button.click();button.click();window.dispatchEvent(new Event("focus"));})()');
+  check(await evaluate('document.querySelector(".directory-toolbar button").disabled'), 'Duplicate refresh disabled during retry');
+  check(await evaluate('document.querySelector("main [role=alert]").textContent.includes("Cannot reach")'), 'Prior failure stays visible while retrying');
+  await ready(); await see('Customer B');
+  const reloads = traffic.slice(beforeRetry).filter(item => item.method === 'GET');
+  for (const path of ['/api/customers', '/api/staff', '/api/services', '/api/appointments']) check(reloads.filter(item => item.path === path).length === 1, 'Retry requests are coalesced: ' + path);
+  check(await evaluate(editorSnapshot) === recoveryDraft, 'Successful retry preserved draft and inline feedback');
+  check(await evaluate('![...document.querySelectorAll("main > [role=alert]")].some(item=>item.textContent.includes("Cannot reach"))'), 'Successful retry cleared load failure');
   await command('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
-  await click('Refresh directories'); await ready(); await see('Customer B');
+  await click('Cancel', 'document.querySelector(".customer-editor")');
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile directory overflow');
-  check(!calls.some(path => path.startsWith('/api/appointments')), 'Appointment API integration added unexpectedly');
+  check(calls.some(path => path === '/api/appointments'), 'Appointment history was not loaded');
   check(dialogs >= 8, 'Confirmation dialogs were not exercised');
 }

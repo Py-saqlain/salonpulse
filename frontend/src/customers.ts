@@ -26,7 +26,7 @@ export function createCustomer(input: CustomerInput, customers: Customer[], id =
   return { id, name: input.name.trim(), phone: normalizePhone(input.phone)!, notes: input.notes.trim() };
 }
 export function customerHistory(customerId: string, appointments: Appointment[]) {
-  const history = appointments.filter(item => item.customerId === customerId).sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`));
+  const history = appointments.filter(item => item.customerId === customerId).sort((a, b) => Date.parse(b.startUTC ?? `${b.date}T${b.time}:00+05:00`) - Date.parse(a.startUTC ?? `${a.date}T${a.time}:00+05:00`));
   const completed = history.filter(item => item.status === 'Completed');
   return { history, completedVisits: completed.length, lastCompleted: completed[0] };
 }

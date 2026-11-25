@@ -41,5 +41,5 @@ export function availabilityError(member: Staff | undefined, date: string, time:
   return null;
 }
 export function upcomingStaffBookings(id: string, appointments: Appointment[], now = Date.now()) {
-  return appointments.filter(item => item.staffId === id && item.status !== 'Cancelled' && item.status !== 'Completed' && new Date(`${item.date}T${item.time}:00+05:00`).getTime() + item.minutes * 60000 > now);
+  return appointments.filter(item => item.staffId === id && item.status !== 'Cancelled' && item.status !== 'Completed' && (item.endUTC ? Date.parse(item.endUTC) : new Date(`${item.date}T${item.time}:00+05:00`).getTime() + item.minutes * 60000) > now);
 }

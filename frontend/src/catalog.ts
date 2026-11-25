@@ -1,3 +1,6 @@
+import { appointmentFromAPI } from './appointments';
+import type { AppointmentDTO } from './appointments';
+import type { Appointment } from './data';
 import { ApiError } from './api';
 import type { ApiClient } from './api';
 import type { Customer, CustomerInput } from './customers';
@@ -6,15 +9,16 @@ import type { Staff, StaffInput, WorkingDay } from './staff';
 import type { Service, ServiceInput } from './services';
 
 export type Resource = 'customers' | 'staff' | 'services';
-type RecordDTO = { id: string; business_id: string; name: string; created_at: string; updated_at: string };
+export type TenantDTO = { id: string; business_id: string; created_at: string; updated_at: string };
+type RecordDTO = TenantDTO & { name: string };
 export type CustomerDTO = RecordDTO & { phone: string | null; notes: string | null };
 export type StaffDTO = RecordDTO & { phone: string | null; specialty: string | null; active: boolean; hours: WorkingDay[] | null };
 export type ServiceDTO = RecordDTO & { category: string | null; description: string; duration_minutes: number; price: string; active: boolean };
-export type Catalog = { customers: Customer[]; staff: Staff[]; services: Service[] };
+export type Catalog = { customers: Customer[]; staff: Staff[]; services: Service[]; appointments: Appointment[] };
 type PageDTO<T> = { items: T[]; total: number; limit: number; offset: number };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function checkRecord<T extends RecordDTO>(record: T, businessId: string): T {
+export function checkRecord<T extends TenantDTO>(record: T, businessId: string): T {
   if (!uuid.test(record.id) || record.business_id !== businessId) throw new Error('The server returned an unexpected business record. Refresh before continuing.');
   return record;
 }
@@ -28,7 +32,7 @@ export const customerToAPI = (input: CustomerInput) => ({ name: input.name.trim(
 export const staffToAPI = (input: StaffInput) => ({ name: input.name.trim(), phone: normalizePhone(input.phone) || null, specialty: input.specialty.trim() || null, active: input.active, hours: input.hours });
 export const serviceToAPI = (input: ServiceInput) => ({ name: input.name.trim(), category: input.category.trim() || null, description: input.description.trim(), duration_minutes: input.minutes, price: input.price.toFixed(2), active: input.active });
 
-export async function readAll<T extends RecordDTO>(api: ApiClient, resource: Resource, businessId: string, signal: AbortSignal): Promise<T[]> {
+export async function readAll<T extends TenantDTO>(api: ApiClient, resource: Resource | 'appointments', businessId: string, signal: AbortSignal): Promise<T[]> {
   const records: T[] = []; const ids = new Set<string>(); let total: number | undefined;
   do {
     if (signal.aborted) throw new Error('Request cancelled');
@@ -47,11 +51,12 @@ export async function readAll<T extends RecordDTO>(api: ApiClient, resource: Res
   return records;
 }
 
-export async function readCatalog(api: ApiClient, businessId: string, signal: AbortSignal): Promise<Catalog> {
-  const [customers, staff, services] = await Promise.all([
-    readAll<CustomerDTO>(api, 'customers', businessId, signal), readAll<StaffDTO>(api, 'staff', businessId, signal), readAll<ServiceDTO>(api, 'services', businessId, signal),
+export async function readCatalog(api: ApiClient, businessId: string, signal: AbortSignal, zone = 'Asia/Karachi'): Promise<Catalog> {
+  const [customers, staff, services, appointments] = await Promise.all([
+    readAll<CustomerDTO>(api, 'customers', businessId, signal), readAll<StaffDTO>(api, 'staff', businessId, signal), readAll<ServiceDTO>(api, 'services', businessId, signal), readAll<AppointmentDTO>(api, 'appointments', businessId, signal),
   ]);
-  return { customers: customers.map(customerFromAPI), staff: staff.map(staffFromAPI), services: services.map(serviceFromAPI) };
+  const records = { customers: customers.map(customerFromAPI), staff: staff.map(staffFromAPI), services: services.map(serviceFromAPI) };
+  return { ...records, appointments: appointments.map(item => appointmentFromAPI(item, records, zone)) };
 }
 
 export function resourceError(error: unknown): string {

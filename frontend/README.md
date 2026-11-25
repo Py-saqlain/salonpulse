@@ -1,8 +1,8 @@
 # SalonPulse frontend
 
 React + TypeScript + Vite with Tailwind. Authentication uses the FastAPI backend;
-Customers, Staff and Services use authenticated API-backed CRUD. Appointments,
-visit history, staff appointment counts and revenue remain a **session-only preview**.
+Customers, Staff, Services and Appointments use authenticated backend data.
+Customer history and visit statistics are derived from saved appointment records.
 
 ## Windows PowerShell
 
@@ -54,6 +54,7 @@ late responses from earlier sessions from restoring a logged-out account.
 ## Business directories and session isolation
 
 The shared `useCatalog` hook loads `/api/customers`, `/api/staff`, `/api/services`
+and `/api/appointments`
 using server UUIDs and tenant-checked response records. It follows all backend
 100-record pages; screens search/filter the complete loaded directory and display
 20 records per UI page. This preserves global search and complete appointment
@@ -61,10 +62,13 @@ selectors until server-side search is available. Loading all records is a protot
 scaling limitation; large directories need backend search and cursor pagination.
 If pagination changes mid-load, the UI requests a refresh rather than merging an
 inconsistent list. Refresh and window focus reload data; no background polling.
-Focus refresh is deferred while a customer, staff, service or appointment-preview
+Focus refresh is deferred while a customer, staff, service or appointment
 editor is mounted, preserving drafts and inline feedback when returning from a
 native confirmation dialog or another window. Closing the editor permits the next
-focus refresh; the explicit Refresh directories action still reloads immediately.
+focus refresh. Explicit refreshes preserve mounted editors and their drafts.
+Retry remains available after a failure; an in-flight guard coalesces repeated
+clicks/focus events. Cached records and failure feedback stay intact during retry,
+and writes remain disabled until a successful reload makes the data current.
 
 Create/edit/delete operations use POST/PATCH/DELETE. Mutations reload shared data,
 show loading/errors, and prevent concurrent form submissions. Blank nullable
@@ -80,23 +84,47 @@ and service directories read-only; the backend authorizes every request. Deletes
 require confirmation and referenced records return a conflict. Deactivation with
 active bookings first receives the backend warning; explicit confirmation retries
 with `confirm_upcoming: true`. Cancelling the dialog leaves the record unchanged.
-Hours changes that conflict with real appointments remain rejected. Local preview
-references also protect records from deletion without changing real bookings.
+Hours changes that conflict with real appointments remain rejected. Referenced
+records cannot be deleted; the backend remains authoritative for these protections.
 
 No legacy `salonpulse.demo.*` storage is read or imported. Catalogs are cleared
 on logout and fetched anew after login, so database records persist across sessions
 without browser storage. In-flight reads are aborted/versioned and old session
-results cannot hydrate another account. Failed refreshes hide stale directories
-until retry. A successful write followed by failed reload may already be saved;
+results cannot hydrate another account. Failed refreshes retain last-loaded records
+with an explicit stale-data warning and block writes until retry succeeds. Initial
+loading failures can also be retried. A write followed by failed reload may already be saved;
 refresh before submitting it again. Tokens still live only in memory.
 
-Appointment creation/edit/history remains the existing local preview, using the
-same live directory UUIDs and saved price/duration snapshots. Quick Add Customer
-inside that form saves a real customer and selects its UUID. Preview bookings
-clear on logout/refresh and never call appointment APIs. Counts/history are labeled
-as previews, not complete backend history. Full appointment integration is next.
-Local preview scheduling still uses Lahore time; real staff hours display the
-business timezone. No new dependencies or backend/schema changes are required.
+## Appointment workflow
+
+Bookings use POST/GET `/api/appointments`, PATCH `/api/appointments/{id}` for
+confirmed-booking edits or status changes, and DELETE for cancellation. Both
+owners and staff can manage appointments. Cancellation keeps history; completed
+appointments have no destructive action. Start is available only once the scheduled
+time arrives; in-progress records can be completed or cancelled. Failed writes
+leave form inputs and inline feedback intact. Quick Add Customer saves and selects
+a real customer UUID.
+
+Dates and filters use the business IANA timezone. Scheduled wall-clock input is
+converted to aware UTC; missing/ambiguous daylight-saving times are rejected.
+Walk-ins omit `starts_at`, use server time and begin `in_progress`. Active staff,
+configured working hours, full service duration and overlap rules are checked in
+the UI and again by the backend. Concurrent requests are resolved by backend locks;
+a losing request displays its conflict without discarding the draft.
+
+Responses use saved `booked_price`/`booked_duration_minutes`, never current catalog
+terms for historical calculations. Ordinary edits retain snapshots. Recalculation
+requires explicit acknowledgement; changing service requires the current-terms
+checkbox. PATCH omits unchanged start times so server sub-minute precision survives.
+Only confirmed bookings can change booking details; status changes are separate.
+
+All server pages are loaded for complete customer history and client-side filters
+(customer name, date, staff, status), with 20 rows per display page. Completed visit
+counts and last completed visit use stable customer IDs and UTC ordering. This
+whole-business loading approach is a scaling limitation; future work can introduce
+backend search/summary contracts. No authentication persistence, new packages,
+backend changes or migrations are introduced here. Refresh still requires login;
+server appointments persist across refresh/logout.
 
 ## Verification
 
@@ -127,3 +155,11 @@ network failure and deactivation/deletion constraints. Its guarded fixture helpe
 changes only its temporary user role and creates one temporary appointment to
 exercise reference restrictions; it always cleans up those businesses and restores
 the database record-ID baseline. It does not implement frontend appointment APIs.
+
+Run `node tests/browser-auth.mjs --appointments` for the appointment browser
+suite. It races two authenticated Chrome tabs against the same staff slot,
+verifies booking/edit/cancellation/status flows, snapshots, history, walk-ins,
+permissions, tenant isolation, persistence and network errors. The shared harness
+always removes only its uniquely marked test businesses and restores the database
+baseline. `--crud` additionally covers failed refresh followed by successful retry,
+request coalescing, and preservation of cached records, draft inputs and feedback.
