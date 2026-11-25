@@ -1,4 +1,4 @@
-"""Booking writes serialize on the tenant root; no schema changes or hard deletes."""
+"""Booking writes serialize on the tenant root; no hard deletes."""
 
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.tenant import TenantScope
+from app.db.locking import lock_business
+from app.services.working_hours import ensure_working_hours
 from app.models import Appointment, AppointmentStatus, AppointmentType, Business, Customer, Service, Staff
 from app.schemas.appointments import AppointmentCreate, AppointmentPatch, AppointmentResponse
 from app.services.resources import resource_write
@@ -27,21 +29,13 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
-def lock_business(session: Session, scope: TenantScope):
-    # NO KEY UPDATE locks conflict with each other but not normal FK key-share
-    # reads. Hold this until commit/rollback before checking/mutating bookings.
-    business = session.scalar(select(Business.id).where(Business.id == scope.business_id).with_for_update(key_share=True))
-    if business is None:
-        raise HTTPException(404, "Business not found")
-
-
 def related_records(session: Session, scope: TenantScope, customer_id, staff_id, service_id):
     scope.get(session, Customer, customer_id)
     staff = scope.get(session, Staff, staff_id)
     service = scope.get(session, Service, service_id)
     if not staff.active or not service.active:
         raise HTTPException(422, "Select active staff and service records")
-    return service
+    return staff, service
 
 
 def end_time(start, minutes):
@@ -64,13 +58,14 @@ def ensure_available(session: Session, scope: TenantScope, staff_id, start, end,
 
 def create_appointment(session: Session, scope: TenantScope, data: AppointmentCreate):
     with resource_write(session, foreign_key_detail=REFERENCE_CONFLICT):
-        lock_business(session, scope)
-        service = related_records(session, scope, data.customer_id, data.staff_id, data.service_id)
+        business = lock_business(session, scope)
+        staff, service = related_records(session, scope, data.customer_id, data.staff_id, data.service_id)
         now = utcnow()
         start = data.starts_at.astimezone(timezone.utc) if data.starts_at is not None else now
         if start < now:
             raise HTTPException(422, "Appointments cannot be booked in the past")
         end = end_time(start, service.duration_minutes)
+        ensure_working_hours(staff.hours, start, end, business.timezone)
         ensure_available(session, scope, data.staff_id, start, end)
         appointment = Appointment(
             business_id=scope.business_id, customer_id=data.customer_id, staff_id=data.staff_id,
@@ -96,7 +91,7 @@ def change_status(appointment: Appointment, target: AppointmentStatus):
 
 def patch_appointment(session: Session, scope: TenantScope, appointment_id, data: AppointmentPatch):
     with resource_write(session, foreign_key_detail=REFERENCE_CONFLICT):
-        lock_business(session, scope)
+        business = lock_business(session, scope)
         appointment = scope.get(session, Appointment, appointment_id)
         booking_fields = data.model_fields_set & {"customer_id", "staff_id", "service_id", "starts_at"}
         scheduling = bool(booking_fields or data.recalculate_service)
@@ -110,7 +105,7 @@ def patch_appointment(session: Session, scope: TenantScope, appointment_id, data
             customer_id = data.customer_id if data.customer_id is not None else appointment.customer_id
             staff_id = data.staff_id if data.staff_id is not None else appointment.staff_id
             service_id = data.service_id if data.service_id is not None else appointment.service_id
-            service = related_records(session, scope, customer_id, staff_id, service_id)
+            staff, service = related_records(session, scope, customer_id, staff_id, service_id)
             start = data.starts_at.astimezone(timezone.utc) if data.starts_at is not None else appointment.starts_at
             if start < utcnow():
                 raise HTTPException(422, "Reschedule this appointment to a future time")
@@ -118,6 +113,7 @@ def patch_appointment(session: Session, scope: TenantScope, appointment_id, data
             minutes = service.duration_minutes if recalculate else appointment.booked_duration_minutes
             price = service.price if recalculate else appointment.booked_price
             end = end_time(start, minutes)
+            ensure_working_hours(staff.hours, start, end, business.timezone)
             ensure_available(session, scope, staff_id, start, end, exclude_id=appointment.id)
             values.update(customer_id=customer_id, staff_id=staff_id, service_id=service_id,
                           starts_at=start, ends_at=end, booked_duration_minutes=minutes, booked_price=price)

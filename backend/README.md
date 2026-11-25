@@ -324,7 +324,7 @@ Duplicate conflicts return HTTP 409 without exposing database details. Deleting
 a record referenced by an appointment returns HTTP 409; history is never cascaded
 away. Staff/services can instead be explicitly marked inactive using PATCH.
 Service price/duration edits do not rewrite appointment snapshots or timing.
-Staff working-hours models and frontend integration remain outside this CRUD task.
+Staff hours and service descriptions are supported as described below; frontend integration remains pending.
 
 The shared resource service commits validated writes atomically, including the
 transaction opened by authentication; failures roll back the request session.
@@ -337,7 +337,7 @@ inputs, normalized duplicates, and appointment-reference protection.
 Owners and staff can use POST/GET `/api/appointments` and GET/PATCH/DELETE
 `/api/appointments/{id}`. All lookups and writes are tenant-scoped. Foreign or
 missing customer/staff/service/appointment IDs return HTTP 404 without disclosing
-another business's records. No migrations or schema changes were needed.
+another business's records.
 
 POST accepts `customer_id`, `staff_id`, `service_id`, optional `booking_type`
 (`scheduled` by default), and `starts_at` as an ISO datetime **with a timezone**.
@@ -392,8 +392,8 @@ This guarantee covers these API/service writers; direct SQL or future writers
 must follow the same locking protocol. Lock timeouts safely roll back rather
 than creating an unchecked booking. The coarse business lock is suitable for
 this prototype; a later high-throughput design may use finer locks or a reviewed
-database exclusion constraint. No staff hours/leave/actual-duration tracking is
-modeled yet. Planned end times remain duration snapshots, not actual checkout.
+database exclusion constraint. Leave and actual-duration tracking are not modeled.
+Planned end times remain duration snapshots, not actual checkout.
 
 Tests cover booking CRUD, walk-ins, snapshots, statuses, history, PKT date
 boundaries, pagination, tenant checks, and two independent PostgreSQL connections
@@ -401,3 +401,55 @@ racing to create/reschedule into the same slot. Most tests roll back outer
 transactions; concurrency tests commit uniquely marked disposable fixtures so
 both connections can see them, then always run targeted cleanup. No persistent
 test appointments or accounts are retained.
+
+
+## Day 7 integration contracts
+
+Migration `4eaceb800869` adds nullable JSONB `staff.hours` and non-null text
+`services.description` (default empty string, at most 2,000 characters). Existing
+staff remain explicitly unconfigured; no all-day availability is inferred.
+Prior migrations are unchanged. Apply from `backend` with the existing venv:
+
+```powershell
+$env:DEBUG = "false" # process-only override if DEBUG=release is inherited
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+Staff POST/PATCH and responses use `hours: null` or a nonempty weekly array:
+
+```json
+{"hours": [{"day": 0, "start": "09:00", "end": "18:00"}]}
+```
+
+Sunday is 0 and Saturday is 6; each day appears at most once. Times are `HH:mm`,
+end must follow start, and overnight shifts are unsupported. Missing days are
+nonworking days. New bookings, walk-ins and rescheduling must fit entirely into
+one shift in the authenticated business's IANA timezone (normally Asia/Karachi).
+Unconfigured hours or invalid availability return 422. Booking snapshots still
+control the duration of existing appointments unless explicitly recalculated.
+
+Hours updates that would invalidate confirmed/in-progress appointments whose
+end is still in the future return 409. Reschedule/cancel those appointments first;
+clearing hours follows the same rule. Staff/service deactivation with such
+bookings returns 409 unless the owner explicitly sends:
+
+```json
+{"active": false, "confirm_upcoming": true}
+```
+
+Confirmation preserves bookings and history; it does not cancel or reassign them.
+Inactive records cannot receive new/rescheduled bookings. Owners alone can edit
+staff/services. `confirm_upcoming` is request-only and cannot bypass hours rules.
+Service POST/PATCH accepts `description`; PATCH omission preserves it, and an
+empty string clears it (null is rejected). All catalog writes share the existing
+business booking lock, covering deactivation, hours, deletion and snapshot reads.
+Tenant reads refresh loaded identities after locks to avoid stale availability.
+Direct SQL writers must still follow this protocol. JSONB's database check validates
+the array container/size; API schemas validate individual days/times and uniqueness.
+
+OpenAPI documents safe 401/403/404/409/422/503 responses, including the Bearer
+challenge. Validation details contain only `loc`, `msg`, `type`; domain errors
+use a string `detail`. PATCH properties distinguish omission from forbidden null,
+and the booking-create schema describes scheduled versus server-timed walk-ins.
+Money remains a decimal string, IDs are UUIDs, and appointment timestamps are UTC.
+Frontend mapping of `minutes` to `duration_minutes` remains an integration step.

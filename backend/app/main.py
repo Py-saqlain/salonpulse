@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.schemas.errors import API_ERRORS
 from app.core.config import Settings, settings
 from app.db.session import Database, get_db
 from app.api.auth import router as auth_router
@@ -32,12 +33,12 @@ def create_app(config: Settings) -> FastAPI:
     application = FastAPI(title=config.app_name, debug=config.debug, lifespan=lifespan)
     application.state.database = database
     application.state.settings = config
-    application.include_router(auth_router)
-    application.include_router(business_router)
-    application.include_router(customers_router)
-    application.include_router(staff_router)
-    application.include_router(services_router)
-    application.include_router(appointments_router)
+    application.include_router(auth_router, responses=API_ERRORS)
+    application.include_router(business_router, responses=API_ERRORS)
+    application.include_router(customers_router, responses=API_ERRORS)
+    application.include_router(staff_router, responses=API_ERRORS)
+    application.include_router(services_router, responses=API_ERRORS)
+    application.include_router(appointments_router, responses=API_ERRORS)
 
     @application.exception_handler(RequestValidationError)
     async def safe_validation_error(request, error: RequestValidationError):

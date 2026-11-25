@@ -28,6 +28,9 @@ from app.schemas.appointments import AppointmentCreate, AppointmentPatch
 from app.services.appointments import create_appointment, patch_appointment
 
 
+ALL_HOURS = [{"day": day, "start": "00:00", "end": "23:59"} for day in range(7)]
+
+
 class AppointmentValidationTests(unittest.TestCase):
     def test_schedule_requires_aware_time_and_server_owned_fields_are_rejected(self):
         data = dict(customer_id=uuid4(), staff_id=uuid4(), service_id=uuid4())
@@ -52,7 +55,7 @@ class AppointmentValidationTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("SALONPULSE_RUN_DB_TESTS") == "1", "local PostgreSQL tests require explicit opt-in")
-class AppointmentDatabaseTests(LocalPostgresTestCase):
+class AppointmentFixture(LocalPostgresTestCase):
     def setUp(self):
         super().setUp()
         self.config = auth_config()
@@ -69,11 +72,11 @@ class AppointmentDatabaseTests(LocalPostgresTestCase):
         self.business_b, self.owner_b, self.customer_b, self.staff_b, self.service_b = self.salon()
         self.staff_user = User(business_id=self.business_a.id, full_name="Receptionist", email=f"staff-{uuid4().hex}@example.com",
                                password_hash="!unusable-test-hash", role=UserRole.STAFF, is_active=True)
-        self.second_staff = Staff(business_id=self.business_a.id, name="Second barber")
+        self.second_staff = Staff(business_id=self.business_a.id, name="Second barber", hours=ALL_HOURS)
         self.long_service = Service(business_id=self.business_a.id, name="Long service", duration_minutes=60, price=Decimal("2000.00"))
         self.session.add_all([self.staff_user, self.second_staff, self.long_service])
         self.session.flush()
-        self.future = datetime.now(timezone.utc) + timedelta(days=2)
+        self.future = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=5, minute=0, second=0, microsecond=0)
 
     def salon(self):
         business = Business(name="Appointment fixture " + uuid4().hex)
@@ -82,7 +85,7 @@ class AppointmentDatabaseTests(LocalPostgresTestCase):
         user = User(business_id=business.id, full_name="Owner", email=f"owner-{uuid4().hex}@example.com",
                     password_hash="!unusable-test-hash", role=UserRole.OWNER, is_active=True)
         customer = Customer(business_id=business.id, name="Customer")
-        staff = Staff(business_id=business.id, name="Barber")
+        staff = Staff(business_id=business.id, name="Barber", hours=ALL_HOURS)
         service = Service(business_id=business.id, name="Haircut", duration_minutes=30, price=Decimal("1000.00"))
         self.session.add_all([user, customer, staff, service])
         self.session.flush()
@@ -109,6 +112,8 @@ class AppointmentDatabaseTests(LocalPostgresTestCase):
         self.assertEqual(status, 201)
         return item
 
+
+class AppointmentDatabaseTests(AppointmentFixture):
     def test_create_read_patch_list_and_delete_cancels_without_losing_history(self):
         item = self.create()
         self.assertEqual(item["business_id"], str(self.business_a.id))
@@ -256,7 +261,7 @@ class AppointmentDatabaseTests(LocalPostgresTestCase):
 
 
 @unittest.skipUnless(os.environ.get("SALONPULSE_RUN_DB_TESTS") == "1", "local PostgreSQL tests require explicit opt-in")
-class AppointmentConcurrencyTests(LocalPostgresTestCase):
+class AppointmentConcurrencyFixture(LocalPostgresTestCase):
     def seed_committed_fixture(self):
         # Separate connections need visible fixtures. Only these uniquely identified
         # records are committed, then targeted cleanup runs even after assertion failure.
@@ -275,12 +280,14 @@ class AppointmentConcurrencyTests(LocalPostgresTestCase):
             session.add(Business(id=business_id, name=name))
             session.flush()
             session.add_all([Customer(id=customer_id, business_id=business_id, name="Concurrency customer"),
-                             Staff(id=staff_id, business_id=business_id, name="Concurrency staff"),
+                             Staff(id=staff_id, business_id=business_id, name="Concurrency staff", hours=ALL_HOURS),
                              Service(id=service_id, business_id=business_id, name="Concurrency service", duration_minutes=30, price=Decimal("1000.00"))])
         payload = AppointmentCreate(customer_id=customer_id, staff_id=staff_id, service_id=service_id,
-                                    starts_at=datetime.now(timezone.utc) + timedelta(days=3))
+                                    starts_at=(datetime.now(timezone.utc) + timedelta(days=3)).replace(hour=5, minute=0, second=0, microsecond=0))
         return TenantScope(business_id), payload
 
+
+class AppointmentConcurrencyTests(AppointmentConcurrencyFixture):
     def test_simultaneous_creates_produce_one_booking_and_one_conflict(self):
         scope, payload = self.seed_committed_fixture()
         barrier = Barrier(2)

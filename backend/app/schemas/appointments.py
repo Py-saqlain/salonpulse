@@ -9,6 +9,12 @@ from app.schemas.resources import ResourceInput, ResourcePatch
 
 
 class AppointmentCreate(ResourceInput):
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"oneOf": [
+        {"required": ["starts_at"], "properties": {"booking_type": {"const": "scheduled"},
+         "starts_at": {"type": "string", "format": "date-time"}}},
+        {"required": ["booking_type"], "properties": {"booking_type": {"const": "walk_in"},
+         "starts_at": {"type": "null"}}},
+    ]})
     customer_id: UUID
     staff_id: UUID
     service_id: UUID

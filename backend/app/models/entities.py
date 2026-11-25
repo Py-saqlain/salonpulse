@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint, Index, Integer, Numeric, String, Text,
     UniqueConstraint, Uuid, func, literal_column, text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base
@@ -70,8 +71,11 @@ class Staff(TenantRecord, Base):
         UniqueConstraint("business_id", "phone", name="uq_staff_business_phone"),
         CheckConstraint("length(trim(name)) > 0", name="name_not_blank"),
         CheckConstraint("phone IS NULL OR phone ~ '^\\+923[0-9]{9}$'", name="normalized_phone"),
+        CheckConstraint("hours IS NULL OR CASE WHEN jsonb_typeof(hours) = 'array' "
+                        "THEN jsonb_array_length(hours) BETWEEN 1 AND 7 ELSE false END", name="hours_array"),
     )
 
+    hours: Mapped[list[dict] | None] = mapped_column(JSONB(none_as_null=True))
     name: Mapped[str] = mapped_column(String(200))
     phone: Mapped[str | None] = mapped_column(String(13))
     specialty: Mapped[str | None] = mapped_column(String(200))
@@ -91,9 +95,11 @@ class Service(TenantRecord, Base):
         CheckConstraint("length(trim(name)) > 0", name="name_not_blank"),
         CheckConstraint("duration_minutes > 0", name="positive_duration"),
         CheckConstraint("price >= 0", name="nonnegative_price"),
+        CheckConstraint("length(description) <= 2000", name="description_length"),
     )
 
     name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
     category: Mapped[str | None] = mapped_column(String(100))
     duration_minutes: Mapped[int] = mapped_column(Integer)
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2))

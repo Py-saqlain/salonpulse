@@ -29,7 +29,7 @@ class TenantScope:
         return select(model).where(model.business_id == self.business_id)
 
     def get(self, session: Session, model: type[Resource], resource_id: UUID) -> Resource:
-        record = session.scalar(self.select(model).where(model.id == resource_id))
+        record = session.scalar(self.select(model).where(model.id == resource_id).execution_options(populate_existing=True))
         if record is None:
             raise HTTPException(404, "Resource not found")
         return record
