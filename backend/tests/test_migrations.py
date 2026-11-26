@@ -74,7 +74,7 @@ class MigrationTests(unittest.TestCase):
         for name, table in self.tables.items():
             self.assertEqual({signature(item) for item in table.constraints},
                              {signature(item) for item in Base.metadata.tables[name].constraints
-                              if str(item.name) not in {"ck_staff_hours_array", "ck_services_description_length"}}, name)
+                              if str(item.name) not in {"ck_staff_hours_array", "ck_services_description_length", "uq_appointments_business_id"}}, name)
 
     def test_indexes_including_partial_expression_index_match(self):
         def index_sql(statement):

@@ -453,3 +453,25 @@ use a string `detail`. PATCH properties distinguish omission from forbidden null
 and the booking-create schema describes scheduled versus server-timed walk-ins.
 Money remains a decimal string, IDs are UUIDs, and appointment timestamps are UTC.
 Frontend mapping of `minutes` to `duration_minutes` remains an integration step.
+
+### Payment model foundation
+
+Revision `e11993c1b0a3` adds `payments` and the appointment tenant-key uniqueness
+constraint used by its composite foreign key. Each UUID receipt belongs to one
+business and appointment, with a positive finite `Numeric(12, 2)` PKR amount,
+`cash`, `bank_transfer`, `jazzcash` or `easypaisa` method, optional reference,
+timezone-aware `paid_at`, and creation/update timestamps. Multiple receipts are
+allowed per appointment; references are not assumed globally unique. Referenced
+appointments and businesses cannot be deleted through cascading relationships.
+
+`app.services.payments.appointment_payment_summary` reads the booked price and
+tenant-filtered receipt sum in one database statement. Status is derived as
+`unpaid`, `partially_paid` or `paid`; a zero-price booking is paid, and an excess
+receipt total is paid with zero balance due. Catalog price changes do not alter
+the booked price used by this calculation. No status column is persisted.
+
+This task adds no payment endpoints, gateways, refunds, receipt write workflow,
+or overpayment prevention. Future payment writes must authenticate the business,
+validate decimal precision before storage (PostgreSQL Numeric rounds to two
+places), and coordinate with appointment changes. Live payment constraint tests
+use the existing `SALONPULSE_RUN_DB_TESTS=1` opt-in and always roll back fixtures.

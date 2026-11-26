@@ -42,6 +42,7 @@ class Business(Record, Base):
     services: Mapped[list["Service"]] = relationship(back_populates="business", passive_deletes="all")
     appointments: Mapped[list["Appointment"]] = relationship(back_populates="business", passive_deletes="all")
     users: Mapped[list["User"]] = relationship(back_populates="business", passive_deletes="all")
+    payments: Mapped[list["Payment"]] = relationship(back_populates="business", passive_deletes="all")
 
 
 class Customer(TenantRecord, Base):
@@ -183,6 +184,7 @@ Index("uq_users_email", func.lower(User.email), unique=True)
 class Appointment(TenantRecord, Base):
     __tablename__ = "appointments"
     __table_args__ = (
+        UniqueConstraint("business_id", "id"),
         ForeignKeyConstraint(["business_id", "customer_id"], ["customers.business_id", "customers.id"],
                              name="fk_appointments_business_customer", ondelete="RESTRICT"),
         ForeignKeyConstraint(["business_id", "staff_id"], ["staff.business_id", "staff.id"],
@@ -209,6 +211,10 @@ class Appointment(TenantRecord, Base):
     booked_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     booked_duration_minutes: Mapped[int] = mapped_column(Integer)
     business: Mapped[Business] = relationship(back_populates="appointments", foreign_keys="Appointment.business_id")
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="appointment", passive_deletes="all", foreign_keys="Payment.appointment_id",
+        primaryjoin="and_(Appointment.business_id == Payment.business_id, Appointment.id == Payment.appointment_id)",
+    )
     # Only the entity ID is synchronized by these relationships. business_id is
     # explicit; composite joins and database FKs prevent cross-tenant references.
     customer: Mapped[Customer] = relationship(
@@ -223,3 +229,44 @@ class Appointment(TenantRecord, Base):
         back_populates="appointments", foreign_keys=[service_id],
         primaryjoin="and_(Service.business_id == Appointment.business_id, Service.id == Appointment.service_id)",
     )
+
+
+class PaymentMethod(str, Enum):
+    CASH = "cash"
+    BANK_TRANSFER = "bank_transfer"
+    JAZZCASH = "jazzcash"
+    EASYPAISA = "easypaisa"
+
+
+class Payment(TenantRecord, Base):
+    """Recorded PKR receipts; no gateway processing or stored payment status."""
+
+    __tablename__ = "payments"
+    __table_args__ = (
+        ForeignKeyConstraint(["business_id", "appointment_id"],
+                             ["appointments.business_id", "appointments.id"],
+                             name="fk_payments_business_appointment", ondelete="RESTRICT"),
+        CheckConstraint("amount > 0 AND amount <> 'NaN'::numeric", name="positive_amount"),
+        CheckConstraint("currency = 'PKR'", name="pkr_currency"),
+        Index("ix_payments_business_appointment", "business_id", "appointment_id"),
+    )
+
+    # The composite index covers business-only reads as well as appointment totals.
+    business_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("businesses.id", ondelete="RESTRICT"),
+    )
+    appointment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="PKR", server_default="PKR")
+    method: Mapped[PaymentMethod] = mapped_column(enum_column(PaymentMethod, "payment_method"))
+    reference: Mapped[str | None] = mapped_column(String(200))
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    business: Mapped[Business] = relationship(back_populates="payments", foreign_keys="Payment.business_id")
+    appointment: Mapped[Appointment] = relationship(
+        back_populates="payments", foreign_keys=[appointment_id],
+        primaryjoin="and_(Appointment.business_id == Payment.business_id, Appointment.id == Payment.appointment_id)",
+    )
+
+    @validates("method")
+    def validate_method(self, key: str, value: PaymentMethod | str) -> PaymentMethod:
+        return PaymentMethod(value)
