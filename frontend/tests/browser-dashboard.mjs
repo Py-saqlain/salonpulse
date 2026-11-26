@@ -75,7 +75,7 @@ finally:e.dispose()
     check(result.status === 0, 'Guarded dashboard database fixture/query');
     return JSON.parse(result.stdout);
   }
-  async function ready() { await wait('!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false', 'dashboard data'); }
+  async function ready() { await wait('!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false', 'dashboard data'); await wait('document.querySelector("[data-revenue-ready=true]") || location.hash!=="#dashboard"', 'dashboard revenue'); }
   async function click(label, scope = 'document') { await evaluate(`([...${scope}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)})).click()`); }
   async function set(selector, value) { await evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});const prototype=input instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()`); }
   async function dashboard() { await evaluate('location.hash="dashboard"'); await ready(); await wait('!!document.querySelector(".dashboard-status-summary")', 'dashboard'); }
@@ -96,7 +96,7 @@ finally:e.dispose()
   }
 
   await route('register'); await submit(accounts[0]); await wait('!!document.querySelector(".app-shell")', 'first business'); await ready();
-  check(await evaluate('[...document.querySelectorAll(".kpi-value")].every(item=>item.textContent==="0"||item.textContent==="PKR 0")'), 'New business starts empty without samples');
+  check(await evaluate('[...document.querySelectorAll(".kpi-value")].every(item=>item.textContent==="0"||item.textContent==="PKR 0.00")'), 'New business starts empty without samples');
   let expected = database(0, true); await refresh(); await assertStats(expected);
   for (const resource of ['appointments','customers','staff']) check(traffic.some(item => item.path === '/api/' + resource && item.method === 'GET' && item.offset === '100'), resource + ' second API page loaded');
   // Read every workload display page, not just its first twenty staff.

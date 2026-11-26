@@ -186,33 +186,52 @@ validation, history, snapshot, availability, pagination and isolation coverage.
 Obsolete demo-storage migration behavior is no longer part of the application.
 
 
-## Appointment payments
+Day 8 adds appointment payment balances, entry and paginated receipt history.
+Cash, bank transfer, JazzCash and Easypaisa use the authenticated backend API.
+Amounts are validated as integer paisa before decimal strings are sent. A
+session-owned ledger coalesces duplicate clicks and retains the immutable UUID
+request key across dialog closure and navigation after uncertain results. Retry
+uses that same request; a confirmed receipt requires an explicit Record another
+payment action before a new key is issued. Keys are not persisted across refresh
+or logout: after losing a session, inspect history before recording again.
 
-Owners and staff can record full/partial payments and inspect balances and
-paginated history through the authenticated backend APIs. Methods are cash,
-bank transfer, JazzCash and Easypaisa; references are optional. Amounts use
-integer paisa validation and decimal-string API payloads. Cancelled appointments
-cannot receive new payments. Balances refresh after successful requests.
+The dashboard and Analytics page use `/api/analytics/revenue`, never completed
+booking prices, for collected revenue. Calendar days, Monday-start weeks and
+calendar months use the business timezone. The chart and method breakdown cover
+30 days ending today; an accessible table exposes exact daily values. Outstanding
+balances and payment-status counts cover all non-cancelled appointments, across
+all dates. Recorded receipts on cancelled appointments remain collected because
+refunds are not implemented. Free appointments count as fully paid.
 
-The session-owned ledger coalesces duplicate submissions and retains the same
-UUID request key and immutable payload after network/server uncertainty. Closing
-the dialog, filtering and navigating do not discard that pending attempt. Retry
-confirms the original receipt; Record another payment explicitly begins a new one.
-Keys exist only in one authenticated app instance: reload, logout/expiry, tab
-closure or a crash loses local recovery state, and another tab has its own ledger.
-Backend idempotency records remain durable. Reconcile receipt history before
-recording after a lost session; a fresh key can create another partial receipt.
-There is no automatic cross-session recovery or bank/provider reconciliation.
+Revenue refreshes after catalog changes, confirmed payment requests, dashboard
+focus refresh and business-local midnight. Refresh revenue retries failed reads;
+unavailable revenue is not displayed as zero. Aggregate money uses BigInt paisa,
+including totals larger than a single receipt's maximum amount. The chart uses
+relative coordinates; monetary values remain exact decimal strings.
 
-The suite contains 76 unit tests, including exact money, validation, pagination,
-response identity, duplicate requests, lost-response retries and browser-readiness
-regressions. Run `node tests/browser-auth.mjs --payments` with the documented CDP
-setup to verify two businesses, persistence, mobile layout and staff permissions.
-The suite drops a committed response and proves that retrying after navigation
-creates no duplicate receipt. Cleanup checks all seven tables and deletes only
-uniquely marked temporary fixtures, with payments removed before appointments.
+Run `node tests/browser-auth.mjs --payments` and `--analytics` for opt-in real
+Chrome verification. Payment tests deliberately drop a committed response, retry
+after navigation, verify no duplicate receipt, and test both businesses and staff
+access. Analytics tests cover timezone boundaries, collection accuracy, payment
+refresh, persistence, network failure and mobile layout. The harness now verifies
+all seven application tables and cleans payments before appointments.
 
-Readiness predicates return booleans before CDP serialization, and inherited
-fieldset-disabled state is tested with `:disabled`. Financial role permissions
-currently allow both owner and staff. Immutable operator attribution, refunds,
-correction workflows and production load testing are not implemented.
+The unit suite currently contains 81 tests, including payment, revenue and browser
+readiness regressions. Readiness predicates are converted to booleans before CDP
+serialization; selectors use normal JavaScript quoting, and inherited disabled
+state is checked with `:disabled` rather than the input's own disabled property.
+
+
+### Payment audit: session boundary
+
+The supported retry session is one authenticated app instance. The ledger is
+replaced at logout/expiry/new login and never shared with another tab. Reload,
+tab closure or a browser crash loses the pending local request key. Backend
+idempotency records remain durable, but automatic cross-session recovery is not
+implemented. Reconcile receipt history after losing an uncertain request; sending
+a fresh key can record another partial receipt. The lost-response browser test
+confirms one receipt after the same request is retried following navigation.
+
+Owners and staff currently have the same payment and revenue-read permissions.
+Granular finance permissions, immutable operator attribution, settlement checks,
+refund/correction flows and production load testing are not included.

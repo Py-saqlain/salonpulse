@@ -128,7 +128,8 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   check(await evaluate('document.querySelector(".customer-card dd").textContent==="2"'), 'Derived completed visits');
   await click('View history', 'document.querySelector("article.customer-card")'); check(await evaluate('document.querySelectorAll(".history-item").length===3'), 'Real customer history');
   await evaluate('location.hash="dashboard"'); await wait('!!document.querySelector(".kpi")', 'dashboard');
-  check(await evaluate('[...document.querySelectorAll(".kpi")].find(card=>card.textContent.includes("Today\u0027s revenue")).textContent.includes("PKR 200")'), 'Revenue uses completed snapshots');
+  await wait('!!document.querySelector("[data-revenue-ready=true]")', 'collected revenue ready');
+  check(await evaluate('[...document.querySelectorAll(".kpi")].find(card=>card.textContent.includes("Today\u0027s collected revenue")).querySelector(".kpi-value").textContent==="PKR 0.00"'), 'Completed unpaid bookings must not count as collected revenue');
 
   await appointments(); await set('.appointment-filters select', 'Cancelled');
   await wait('document.querySelectorAll(".appointment").length===1', 'status filter');

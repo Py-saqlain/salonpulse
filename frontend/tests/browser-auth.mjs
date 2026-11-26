@@ -131,7 +131,12 @@ try {
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--payments')) {
+  if (process.argv.includes('--analytics')) {
+    const { verifyAnalytics } = await import('./browser-analytics.mjs');
+    await verifyAnalytics({ accounts, command, evaluate, wait, route, submit, logout, login, check });
+    check(exceptions === 0, 'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live analytics browser checks.`);
+  } else if (process.argv.includes('--payments')) {
     const { verifyPayments } = await import('./browser-payments.mjs');
     await verifyPayments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, setInterceptor: value => { interception = value; } });
     check(exceptions === 0, 'Browser runtime exceptions');
@@ -208,7 +213,7 @@ try {
   const mobile = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(tmpdir(), 'salonpulse-auth-mobile.png'), Buffer.from(mobile.data, 'base64'));
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile auth horizontal overflow');
-  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services','/api/appointments'].includes(path)), 'Unexpected business-resource API calls');
+  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services','/api/appointments','/api/analytics/revenue'].includes(path)), 'Unexpected business-resource API calls');
   check(exceptions === 0, 'Browser runtime exceptions');
   console.log(`PASS: ${checks} live browser checks; desktop/mobile, registration, login, logout, refresh, expiry, 401, network errors, duplicates and tenant/demo isolation.`);
   }

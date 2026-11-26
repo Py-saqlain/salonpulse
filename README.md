@@ -5,7 +5,8 @@ The existing monorepo contains a React/TypeScript/Vite/Tailwind frontend and a
 FastAPI/SQLAlchemy/psycopg/PostgreSQL backend.
 
 Implemented workflows include registration/login, business-scoped customers,
-staff and working hours, services, appointments, walk-ins, receipt recording. Tokens remain in memory; refreshing requires login again.
+staff and working hours, services, appointments, walk-ins, receipt recording and
+revenue reporting. Tokens remain in memory; refreshing requires login again.
 
 - [Frontend setup and browser verification](frontend/README.md)
 - [Backend configuration, API contracts and migrations](backend/README.md)
@@ -63,6 +64,21 @@ inspect history and reconcile any uncertain payment before recording again;
 creating a new key can create another legitimate partial receipt. Backend key
 uniqueness remains durable, but the frontend has no automatic cross-session
 recovery. Never use a new key merely to retry an unconfirmed payment.
+
+## Revenue reporting
+
+The dashboard and Analytics page use `GET /api/analytics/revenue` for actual
+collected receipts, not unpaid or completed booking prices. Optional `date` selects
+a reporting date in the authenticated business timezone. Totals cover calendar
+days, Monday-start weeks and calendar months. A zero-filled 30-day trend and
+method breakdown share the same reporting window. Outstanding balances and
+paid/partially-paid/unpaid counts cover current non-cancelled appointments across
+all dates; they are not historical balances as of the reporting date.
+
+Cancelled appointments are excluded from outstanding balances and payment counts,
+but their existing receipts remain collected because refunds are not implemented.
+Free appointments count as paid. Both owners and staff currently have payment and
+analytics access; more granular financial roles are not implemented.
 
 ## Verification
 

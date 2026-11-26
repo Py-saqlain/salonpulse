@@ -15,7 +15,5 @@ export function dashboardStats(appointments: Appointment[], staff: Staff[], time
     return { id: member.id, name: member.name, active: member.active, appointments: bookings.length, minutes: bookings.reduce((total, item) => total + item.minutes, 0) };
   }).sort((a, b) => b.appointments - a.appointments || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   return { today, daily, statuses, total: daily.length, active: daily.length - statuses.Cancelled, upcoming, workload,
-    remainingToday: upcoming.filter(item => localDateTime(item.startUTC, timezone).date === today).length,
-    // Preserve the existing completed-booking revenue definition; no payment logic.
-    revenue: daily.filter(item => item.status === 'Completed').reduce((total, item) => total + item.price, 0) };
+    remainingToday: upcoming.filter(item => localDateTime(item.startUTC, timezone).date === today).length };
 }

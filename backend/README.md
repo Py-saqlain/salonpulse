@@ -535,3 +535,46 @@ marked businesses, including concurrent requests. Credentials stay in memory;
 cleanup removes only those fixtures and verifies every application record-ID
 baseline. The complete automated suite also tests transactional booking/payment
 races using the same guarded local development database.
+
+
+### Receipt-based revenue analytics
+
+`GET /api/analytics/revenue` is available to authenticated owners and staff in
+only their own business. Optional `date=YYYY-MM-DD` selects a calendar reporting
+date; omission resolves today using the business timezone. Unknown query fields,
+including business_id, are rejected. There is no client-selected tenant context.
+
+The response includes tenant identity, PKR currency, timezone, reporting date,
+`daily`, `weekly` (Monday start) and `monthly` objects with `start`,
+`end_exclusive` and decimal-string `collected` totals. A zero-filled 30-day `trend`
+ends on the reporting date, and `method_breakdown` covers that same window for
+all four payment methods. Every collection uses Payment.paid_at, never booking,
+completion or receipt-created timestamps. Existing receipts on cancelled
+appointments still count as collected; refunds/gateways are outside scope.
+
+`outstanding` and `appointment_counts` (paid, partially_paid, unpaid) are current
+all-date balances on non-cancelled appointments, not historical balances as of
+an optional reporting date. Zero-price appointments are paid. Receipts are summed
+per appointment before joining bookings, preventing double counting across partial
+payments. PostgreSQL aggregates grouped local payment dates/methods and Decimal
+arithmetic preserves paisa. The business lock makes collection and outstanding
+queries consistent with receipt and booking writers. No schema migration is needed.
+
+Focused tests cover exact boundary inclusion/exclusion, leap/year/month/week
+boundaries, zero data, partial payments, completed-unpaid bookings, cancelled
+receipts, timezone-specific today, roles and tenant isolation. Run the complete
+backend suite with the documented local database opt-in; fixture writes roll back.
+
+
+### Financial audit limitations
+
+Frontend retry keys survive only the same authenticated app instance. The server
+retains tenant/key uniqueness, but the frontend cannot automatically recover a
+lost key after reload/logout/expiry/tab closure. Check and reconcile history
+before recording another payment after an uncertain request. A fresh key denotes
+a new receipt and is not deduplicated by amount/reference. Owners and staff both
+have payment and analytics access. Receipt timestamps do not constitute an
+immutable operator audit trail. Provider reconciliation, refunds/corrections,
+production load testing, deployment hardening and backup/restore drills remain
+outside the current implementation. Direct SQL writers must honor application
+locking and validation; there is no aggregate overpayment database constraint.

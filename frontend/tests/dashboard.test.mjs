@@ -25,7 +25,7 @@ test('daily statuses use business start date across UTC midnight, including exac
   const result = dashboardStats(rows, staff, 'Asia/Karachi', now);
   assert.equal(result.today, '2030-01-02'); assert.equal(result.total, 4); assert.equal(result.active, 3);
   assert.deepEqual(result.statuses, { Confirmed: 1, 'In progress': 1, Completed: 1, Cancelled: 1 });
-  assert.equal(result.remainingToday, 1); assert.equal(result.revenue, 100);
+  assert.equal(result.remainingToday, 1); assert.equal('revenue' in result, false); // Bookings are not collected revenue.
   assert.equal(dashboardStats(rows, staff, 'UTC', now).total, 4);
   assert.equal(dashboardStats(rows, staff, 'UTC', now).statuses.Completed, 0);
 });
