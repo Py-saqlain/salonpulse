@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -92,9 +92,10 @@ test('expiry requires a finite expiration claim and identity must match the busi
   for (const changed of [{ business_id: 'other' }, { role: 'admin' }, { is_active: false }]) assert.throws(() => session.checkIdentity({ ...user, ...changed }, { id: 'business' }));
 });
 
-test('every login starts with independent empty data and never accesses legacy storage', () => {
-  globalThis.localStorage = { getItem() { throw new Error('Legacy storage must not be read'); } };
-  const first = session.emptyWorkspace(); first.customers.push({ id: 'previous-tenant' });
-  assert.deepEqual(session.emptyWorkspace(), { customers: [], staff: [], services: [], appointments: [] });
-  delete globalThis.localStorage;
+test('production frontend contains no legacy business storage or sample directories', () => {
+  const root = new URL('../src/', import.meta.url);
+  for (const name of readdirSync(root).filter(name => /\.tsx?$/.test(name))) {
+    const source = readFileSync(new URL(name, root), 'utf8');
+    assert.doesNotMatch(source, /\b(localStorage|sessionStorage|seedCustomers|seedStaff|seedServices|seedAppointments|loadStore|STORAGE_KEY|DemoStore)\b/, name);
+  }
 });

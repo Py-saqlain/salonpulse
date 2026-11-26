@@ -1,5 +1,4 @@
 import type { BusinessProfile, UserProfile } from './api';
-import type { DemoStore } from './data';
 
 // Decoding only schedules local logout. The backend validates the token on every request.
 export function tokenExpiresAt(token: string): number {
@@ -15,9 +14,4 @@ export function checkIdentity(user: UserProfile, business: BusinessProfile): voi
   if (!user.is_active || !user.id || user.business_id !== business.id || !['owner', 'staff'].includes(user.role)) {
     throw new Error('Your business profile could not be verified. Please log in again.');
   }
-}
-
-export function emptyWorkspace(): DemoStore {
-  // Never hydrate global demo storage, seed data or another login's workspace.
-  return { customers: [], staff: [], services: [], appointments: [] };
 }

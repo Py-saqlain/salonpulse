@@ -1,13 +1,6 @@
 import type { Appointment } from './data';
 export type Service = { id: string; name: string; category: string; description: string; minutes: number; price: number; active: boolean };
 export type ServiceInput = Omit<Service, 'id'>;
-export const seedServices: Service[] = [
-  { name: 'Signature haircut & beard', minutes: 45, price: 2500, category: 'Hair & grooming' },
-  { name: 'Hair colour & styling', minutes: 90, price: 8500, category: 'Hair & grooming' },
-  { name: 'Haircut & wash', minutes: 30, price: 1800, category: 'Hair & grooming' },
-  { name: 'Facial & skin care', minutes: 60, price: 4500, category: 'Skin care' },
-  { name: 'Beard trim & shaping', minutes: 30, price: 1200, category: 'Hair & grooming' },
-].map((service, i) => ({ ...service, id: `service-${i}`, description: '', active: true }));
 export const normalizeServiceName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 export function validateService(input: ServiceInput, services: Service[], excludeId?: string): string | null {
   if (!input.name.trim()) return 'Enter a service name.';
@@ -18,11 +11,6 @@ export function validateService(input: ServiceInput, services: Service[], exclud
   if (input.active && services.some(service => service.active && service.id !== excludeId && normalizeServiceName(service.name) === normalizeServiceName(input.name))) return 'An active service already uses this name. Choose a different name or edit the existing service.';
   return null;
 }
-export function makeService(input: ServiceInput, services: Service[], id: string = crypto.randomUUID()): Service {
-  const error = validateService(input, services, id);
-  if (error) throw new Error(error);
-  return { ...input, id, name: input.name.trim(), category: input.category.trim(), description: input.description.trim() };
-}
 export function bookingService(input: { serviceId: string; recalculateService?: boolean }, services: Service[], existing?: Appointment): { name: string; minutes: number; price: number } | string {
   const service = services.find(service => service.id === input.serviceId);
   if (!service) return 'Choose a service.';
@@ -32,5 +20,5 @@ export function bookingService(input: { serviceId: string; recalculateService?: 
   return { name: service.name, minutes: service.minutes, price: service.price };
 }
 export function upcomingServiceBookings(id: string, appointments: Appointment[], now = Date.now()) {
-  return appointments.filter(item => item.serviceId === id && item.status !== 'Completed' && item.status !== 'Cancelled' && (item.endUTC ? Date.parse(item.endUTC) : new Date(`${item.date}T${item.time}:00+05:00`).getTime() + item.minutes * 60000) > now);
+  return appointments.filter(item => item.serviceId === id && item.status !== 'Completed' && item.status !== 'Cancelled' && Date.parse(item.endUTC) > now);
 }

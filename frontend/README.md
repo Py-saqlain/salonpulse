@@ -163,3 +163,24 @@ permissions, tenant isolation, persistence and network errors. The shared harnes
 always removes only its uniquely marked test businesses and restores the database
 baseline. `--crud` additionally covers failed refresh followed by successful retry,
 request coalescing, and preservation of cached records, draft inputs and feedback.
+
+
+The dashboard uses authenticated records from every API page, with daily counts
+based on the appointment start date in the business timezone. Cancelled bookings
+remain in status totals but are excluded from the appointment KPI and staff
+workload. Upcoming shows the next five future confirmed bookings and the full
+count. Workload includes retained inactive staff and booked duration snapshots.
+Business data is not seeded or persisted in localStorage.
+
+Run `node tests/browser-auth.mjs --dashboard` for two-business live dashboard
+checks, including pagination, timezone boundaries, statistics, CRUD refresh,
+persistence, tenant isolation and mobile layout. To use another isolated local
+Chrome debugging session, set `$env:SALONPULSE_CDP_URL='http://127.0.0.1:9224'`.
+After renaming modules that differ only by case, restart Vite if its development
+module graph retains an old path; the production compiler uses the current files.
+
+The unit suite now contains 61 tests. The earlier 56-to-36 count change came from
+replacing 33 demo-era customer/storage tests with eight API-era domain tests and
+adding five dashboard tests. A further 25 API regression tests preserve relevant
+validation, history, snapshot, availability, pagination and isolation coverage.
+Obsolete demo-storage migration behavior is no longer part of the application.

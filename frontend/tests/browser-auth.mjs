@@ -1,3 +1,5 @@
+const cdpOrigin = process.env.SALONPULSE_CDP_URL ?? 'http://127.0.0.1:9223';
+if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(cdpOrigin)) throw new Error('CDP must use a local HTTP endpoint');
 // Opt-in real Chrome verification. Requires localhost services, Chrome CDP on 9223,
 // and the existing backend venv. Creates two unique businesses; always cleans only those.
 import { spawnSync } from 'node:child_process';
@@ -94,7 +96,7 @@ async function login(account) {
 
 try {
   // Own a fresh tab rather than attaching to a prior test's navigating target.
-  const response = await fetch('http://127.0.0.1:9223/json/new?about:blank', { method: 'PUT' });
+  const response = await fetch(cdpOrigin + '/json/new?about:blank', { method: 'PUT' });
   if (!response.ok) throw new Error('Could not create a fresh verification tab');
   const page = await response.json(); pageId = page.id;
   socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -114,7 +116,7 @@ try {
       }
     } else if (data.method === 'Network.requestWillBeSent' && data.params.request.url.startsWith('http://127.0.0.1:8000/')) {
       calls.push(new URL(data.params.request.url).pathname);
-      traffic.push({ path: new URL(data.params.request.url).pathname, method: data.params.request.method });
+      traffic.push({ path: new URL(data.params.request.url).pathname, method: data.params.request.method, offset: new URL(data.params.request.url).searchParams.get('offset') });
     } else if (data.method === 'Network.responseReceived' && data.params.response.url.startsWith('http://127.0.0.1:8000/')) {
       responses.push({ path: new URL(data.params.response.url).pathname, status: data.params.response.status });
     } else if (data.method === 'Runtime.exceptionThrown') exceptions++;
@@ -136,14 +138,19 @@ try {
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--appointments')) {
+  if (process.argv.includes('--dashboard')) {
+    const { verifyDashboard } = await import('./browser-dashboard.mjs');
+    await verifyDashboard({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, traffic });
+    check(exceptions === 0, 'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live dashboard browser checks.`);
+  } else if (process.argv.includes('--appointments')) {
     const { verifyAppointments } = await import('./browser-appointments.mjs');
-    await verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic });
+    await verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic, cdpOrigin });
     check(exceptions === 0, 'Browser runtime exceptions');
     console.log(`PASS: ${checks} live appointment browser checks.`);
   } else if (process.argv.includes('--crud')) {
     const { verifyCrud } = await import('./browser-crud.mjs');
-    await verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic });
+    await verifyCrud({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, calls, traffic, cdpOrigin });
     check(exceptions === 0, 'Browser runtime exceptions');
     console.log(`PASS: ${checks} live CRUD browser checks.`);
   } else {
@@ -220,7 +227,7 @@ try {
 } finally {
   socket?.close();
   for (const request of pending.values()) clearTimeout(request.timer);
-  if (pageId) await fetch('http://127.0.0.1:9223/json/close/' + pageId);
+  if (pageId) await fetch(cdpOrigin + '/json/close/' + pageId);
   const after = database(true);
   if (after !== baseline) { console.error('FAIL: Database baseline mismatch after cleanup'); process.exitCode = 1; }
   else console.log('PASS: Temporary businesses/accounts cleaned up; all six tables restored to baseline.');

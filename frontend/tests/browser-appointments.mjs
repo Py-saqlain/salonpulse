@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
-export async function verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket }) {
+export async function verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, cdpOrigin }) {
   socket.addEventListener('message', event => {
     if (JSON.parse(event.data).method === 'Page.javascriptDialogOpening') void command('Page.handleJavaScriptDialog', { accept: true });
   });
@@ -58,13 +58,13 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
     await set('dialog input[type=date]', future, run); await set('dialog input[type=time]', time, run);
   }
   async function secondTab() {
-    const page = await (await fetch('http://127.0.0.1:9223/json/new?about:blank', { method: 'PUT' })).json();
+    const page = await (await fetch(cdpOrigin + '/json/new?about:blank', { method: 'PUT' })).json();
     const connection = new WebSocket(page.webSocketDebuggerUrl); await new Promise((resolve, reject) => { connection.onopen = resolve; connection.onerror = reject; });
     let next = 0; const requests = new Map();
     connection.onmessage = event => { const data = JSON.parse(event.data); if (!data.id) return; const request = requests.get(data.id); if (!request) return; requests.delete(data.id); clearTimeout(request.timer); if (data.error) { const error = new Error('Secondary Chrome command failed'); error.navigationContextUnavailable = data.error.code === -32000; request.reject(error); } else request.resolve(data.result); };
     const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++next; const timer = setTimeout(() => { requests.delete(id); reject(new Error('Secondary Chrome timeout')); }, 20000); requests.set(id, { resolve, reject, timer }); connection.send(JSON.stringify({ id, method, params })); });
     const run = async expression => { const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw new Error('Secondary browser evaluation failed'); return result.result.value; };
-    const shutdown = async () => { connection.close(); for (const request of requests.values()) clearTimeout(request.timer); await fetch('http://127.0.0.1:9223/json/close/' + page.id); };
+    const shutdown = async () => { connection.close(); for (const request of requests.values()) clearTimeout(request.timer); await fetch(cdpOrigin + '/json/close/' + page.id); };
     try {
       await send('Runtime.enable'); await send('Page.enable'); await send('Page.navigate', { url: 'http://127.0.0.1:5173/#login' });
       await until(run, '!!document.querySelector(".auth-form")', 'secondary login');
