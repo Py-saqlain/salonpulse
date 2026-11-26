@@ -130,7 +130,7 @@ class UserMigrationTests(unittest.TestCase):
     def test_revision_depends_on_initial_and_is_the_only_head(self):
         self.assertEqual(self.revision.down_revision, "b56e17b6641d")
         self.assertEqual(self.revision.doc, "add users table")
-        self.assertEqual(self.heads, ["e11993c1b0a3"])
+        self.assertEqual(self.heads, ["9b54ee7f2482"])
 
     def test_upgrade_only_creates_users_and_its_two_indexes(self):
         self.assertEqual([type(statement) for statement in self.statements], [CreateTable, CreateIndex, CreateIndex])

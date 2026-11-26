@@ -18,6 +18,7 @@ from app.api.customers import router as customers_router
 from app.api.staff import router as staff_router
 from app.api.services import router as services_router
 from app.api.appointments import router as appointments_router
+from app.api.payments import router as payments_router
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -39,6 +40,7 @@ def create_app(config: Settings) -> FastAPI:
     application.include_router(staff_router, responses=API_ERRORS)
     application.include_router(services_router, responses=API_ERRORS)
     application.include_router(appointments_router, responses=API_ERRORS)
+    application.include_router(payments_router, responses=API_ERRORS)
 
     @application.exception_handler(RequestValidationError)
     async def safe_validation_error(request, error: RequestValidationError):

@@ -243,6 +243,9 @@ class Payment(TenantRecord, Base):
 
     __tablename__ = "payments"
     __table_args__ = (
+        UniqueConstraint("business_id", "idempotency_key", name="uq_payments_business_idempotency"),
+        CheckConstraint("(idempotency_key IS NULL AND request_fingerprint IS NULL) OR "
+                        "(idempotency_key IS NOT NULL AND request_fingerprint IS NOT NULL)", name="idempotency_pair"),
         ForeignKeyConstraint(["business_id", "appointment_id"],
                              ["appointments.business_id", "appointments.id"],
                              name="fk_payments_business_appointment", ondelete="RESTRICT"),
@@ -260,6 +263,9 @@ class Payment(TenantRecord, Base):
     currency: Mapped[str] = mapped_column(String(3), default="PKR", server_default="PKR")
     method: Mapped[PaymentMethod] = mapped_column(enum_column(PaymentMethod, "payment_method"))
     reference: Mapped[str | None] = mapped_column(String(200))
+    # Nullable only for receipts created before the authenticated write API.
+    idempotency_key: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
     paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     business: Mapped[Business] = relationship(back_populates="payments", foreign_keys="Payment.business_id")
     appointment: Mapped[Appointment] = relationship(

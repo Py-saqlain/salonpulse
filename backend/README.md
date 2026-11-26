@@ -470,8 +470,68 @@ tenant-filtered receipt sum in one database statement. Status is derived as
 receipt total is paid with zero balance due. Catalog price changes do not alter
 the booked price used by this calculation. No status column is persisted.
 
-This task adds no payment endpoints, gateways, refunds, receipt write workflow,
-or overpayment prevention. Future payment writes must authenticate the business,
-validate decimal precision before storage (PostgreSQL Numeric rounds to two
-places), and coordinate with appointment changes. Live payment constraint tests
+The model foundation is extended by the authenticated receipt API below. No
+gateway processing or refunds are implemented. Live payment constraint tests
 use the existing `SALONPULSE_RUN_DB_TESTS=1` opt-in and always roll back fixtures.
+
+### Authenticated payment API
+
+Owners and staff can use these endpoints with a Bearer access token:
+
+- `POST /api/appointments/{appointment_id}/payments`: record a receipt (201),
+  or return the original receipt for an identical idempotent retry (200).
+- `GET /api/appointments/{appointment_id}/payments?limit=20&offset=0`: paginated
+  history (`items`, `total`, `limit`, `offset`) plus `summary` containing decimal
+  strings `booked_price`, `total_paid`, `balance_due` and derived `state`.
+- `GET /api/payments/{payment_id}`: retrieve one tenant-owned receipt.
+
+Example POST body (generate and retain a new random UUID v4 per intended receipt):
+
+```json
+{"amount":"250.25","method":"cash","idempotency_key":"638e0bb9-c32e-4f24-8394-c8cb9918dfe6"}
+```
+
+Optional `reference` is trimmed and limited to 200 characters. Optional `paid_at`
+must include a timezone and cannot be in the future; omission uses the server
+timestamp. Amounts must be finite, positive and fit Numeric(12,2) without rounding.
+The four supported methods are `cash`, `bank_transfer`, `jazzcash`, `easypaisa`.
+Responses include receipt UUID, business/appointment UUIDs, amount, currency,
+method, reference, paid_at, idempotency_key and audit timestamps. They exclude the
+internal request fingerprint. No client-supplied business, role or currency is
+accepted. Pagination limits are 1-100, with a nonnegative offset.
+
+Reuse the same idempotency key and payload after a network failure; do not
+generate a new key for a retry. Keys are unique within a business. A changed
+appointment, amount, method, reference or explicitly supplied timestamp with the
+same key returns 409. Formatting-equivalent amounts and UTC-equivalent timestamps
+are normalized. A retry of an existing receipt remains safe after cancellation.
+Different keys represent separate intended partial payments, even with equal
+amounts; this API does not guess duplicates from amount or payment reference.
+
+Migration `9b54ee7f2482` adds nullable key/fingerprint columns for existing model-era
+receipts, a paired-value CHECK and tenant-scoped uniqueness. API submissions always
+require a key. It does not rewrite or delete prior receipts.
+
+New payments against cancelled appointments and payments exceeding the current
+balance return 409. Invalid input returns 422; missing/invalid authentication 401;
+inaccessible tenant-owned UUIDs 404; database unavailability 503. Payment writes
+share the business row lock with booking and catalog writes. Appointment price
+recalculation cannot reduce the booked price below recorded receipts. History
+reads take the same lock so their totals and page are consistent. This deliberately
+serializes writers within each business; direct SQL writers must use the same
+locking/validation protocol. There are no payment update/delete endpoints or
+external settlement checks, so existing receipts remain a local accounting record.
+
+For real HTTP verification from `backend`:
+
+```powershell
+$env:DEBUG = 'false'
+$env:SALONPULSE_RUN_DB_TESTS = '1'
+.\.venv\Scripts\python.exe -B tests/live_payments.py
+```
+
+This starts a separate temporary local Uvicorn server and uses two uniquely
+marked businesses, including concurrent requests. Credentials stay in memory;
+cleanup removes only those fixtures and verifies every application record-ID
+baseline. The complete automated suite also tests transactional booking/payment
+races using the same guarded local development database.

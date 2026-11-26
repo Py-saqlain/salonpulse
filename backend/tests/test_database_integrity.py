@@ -178,7 +178,7 @@ class DatabaseIntegrityTests(LocalPostgresTestCase):
         inspector = inspect(self.connection)
         self.assertEqual(set(inspector.get_table_names()), set(Base.metadata.tables) | {"alembic_version"})
         self.assertEqual(self.connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all(),
-                         ["e11993c1b0a3"])
+                         ["9b54ee7f2482"])
         totals = {"checks": 0, "foreign_keys": 0, "uniques": 0, "indexes": 0}
         for name, table in Base.metadata.tables.items():
             self.assertEqual(inspector.get_pk_constraint(name)["constrained_columns"], ["id"])
@@ -200,7 +200,7 @@ class DatabaseIntegrityTests(LocalPostgresTestCase):
             indexes = [i for i in inspector.get_indexes(name) if not i.get("duplicates_constraint")]
             self.assertEqual({i["name"] for i in indexes}, {str(i.name) for i in table.indexes})
             totals["indexes"] += len(indexes)
-        self.assertEqual(totals, dict(checks=23, foreign_keys=10, uniques=6, indexes=12))
+        self.assertEqual(totals, dict(checks=24, foreign_keys=10, uniques=7, indexes=12))
         migration = MigrationContext.configure(connection=self.connection, opts={
             "target_metadata": Base.metadata, "compare_type": True, "compare_server_default": True,
             "autogenerate_plugins": ["alembic.autogenerate.*", "alembic.ext.checkconstraint_byname"],

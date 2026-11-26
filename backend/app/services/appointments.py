@@ -112,6 +112,9 @@ def patch_appointment(session: Session, scope: TenantScope, appointment_id, data
             recalculate = service_id != appointment.service_id or data.recalculate_service
             minutes = service.duration_minutes if recalculate else appointment.booked_duration_minutes
             price = service.price if recalculate else appointment.booked_price
+            from app.services.payments import appointment_payment_summary
+            if price < appointment_payment_summary(session, scope, appointment.id).total_paid:
+                raise HTTPException(409, "Booked price cannot be reduced below recorded payments")
             end = end_time(start, minutes)
             ensure_working_hours(staff.hours, start, end, business.timezone)
             ensure_available(session, scope, staff_id, start, end, exclude_id=appointment.id)
