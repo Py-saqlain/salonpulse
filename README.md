@@ -1,77 +1,97 @@
 # SalonPulse
 
-Mobile-first, multi-tenant SaaS for barbershops and beauty salons in Lahore,
-Pakistan. This existing repository contains two independent applications.
+Mobile-first salon management for barbershops and beauty salons in Pakistan.
+The existing monorepo contains a React/TypeScript/Vite/Tailwind frontend and a
+FastAPI/SQLAlchemy/psycopg/PostgreSQL backend.
 
-## Files
+Implemented workflows include registration/login, business-scoped customers,
+staff and working hours, services, appointments, walk-ins, receipt recording. Tokens remain in memory; refreshing requires login again.
 
-- `frontend/`: React + TypeScript + Vite + Tailwind CSS. `src/main.tsx` contains
-  a responsive placeholder, `src/styles.css` imports Tailwind, `vite.config.ts`
-  configures its plugins, and `tsconfig.json` enables strict TypeScript checks.
-- `backend/main.py`: FastAPI application with `GET /health` returning
-  `{"status":"ok"}`. `requirements.txt` pins installed Python dependencies.
-- `docs/architecture.md`: React → FastAPI → PostgreSQL and planned tenant isolation.
-- `.gitignore`: excludes virtual environments, Python caches, `node_modules`,
-  `.env` variants, and build outputs. Safe `.env.example` files may be tracked.
+- [Frontend setup and browser verification](frontend/README.md)
+- [Backend configuration, API contracts and migrations](backend/README.md)
+- API entry point: `backend/app/main.py`; interactive docs: `/docs`.
+- Private `.env`, virtual environments, caches, dependencies and build output are
+  Git-ignored. Never put real credentials in tracked examples or frontend settings.
 
-No authentication, database models, business features, or AI are implemented.
+## Windows PowerShell: existing development checkout
 
-## Windows PowerShell setup
-
-Install Node.js 24 LTS with npm and native Windows Python 3.13+ with pip.
-Use two terminals, starting from the repository root. This machine has native
-Python 3.13 at the path below; update that path on another machine. Avoid the
-MSYS2 Python on this machine's PATH when creating the Windows environment.
-`npm.cmd` and the virtual environment's Python work without changing PowerShell
-execution policy or activating the environment.
+Use Node.js 24 and the existing native Windows Python virtual environment. Before
+first use, configure PostgreSQL and private backend settings using the backend
+README. Do not overwrite an existing `backend/.env`. The frontend uses
+`VITE_API_BASE_URL` (default `http://127.0.0.1:8000`); this setting is public and
+must never contain secrets. Dependencies are installed; if rebuilding them on a
+new checkout, use `npm.cmd ci` in frontend and the backend requirements file.
 
 Frontend terminal:
 
 ```powershell
 Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\frontend'
-npm.cmd install
-npm.cmd run dev
+npm.cmd run dev -- --host 127.0.0.1
 ```
-
-Open <http://localhost:5173>. Stop with Ctrl+C.
 
 Backend terminal:
 
 ```powershell
-Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse'
-& "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" -m venv .\backend\.venv
-.\backend\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
-Set-Location .\backend
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\backend'
+$env:DEBUG = 'false'
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open <http://127.0.0.1:8000/health> or the API docs at
-<http://127.0.0.1:8000/docs>. Stop with Ctrl+C. PostgreSQL is planned and is not
-required yet. The frontend currently makes no API requests.
+Open <http://127.0.0.1:5173>. Health checks are
+<http://127.0.0.1:8000/health> and <http://127.0.0.1:8000/health/db>.
+Stop either server with Ctrl+C. Authentication and business workflows require the
+configured database, applied Alembic migrations and a private JWT signing secret.
 
-## Checks
+## Payments
 
-With the backend running, use another PowerShell terminal:
+Owners and staff can record full/partial PKR payments, review balances and browse
+paginated receipt history. Methods: cash, bank transfer, JazzCash and Easypaisa.
+Money is sent as decimal strings; the UI validates integer paisa. Cancelled
+appointments cannot receive new payments. API writes serialize with appointment
+changes to reject overpayments and preserve booked-price consistency.
+
+- `POST /api/appointments/{id}/payments`: record a receipt using a UUID v4
+  idempotency key; identical retries return the original receipt.
+- `GET /api/appointments/{id}/payments`: paginated history and derived balances.
+- `GET /api/payments/{id}`: one authenticated, tenant-scoped receipt.
+
+Pending retry keys live only in the current authenticated app instance. Duplicate
+clicks and uncertain requests reuse the same immutable payload/key across dialog
+closure, filters and navigation. Reload, logout, expiry, tab closure or a crash
+loses that local key. A new tab/login has a separate ledger. After losing a session,
+inspect history and reconcile any uncertain payment before recording again;
+creating a new key can create another legitimate partial receipt. Backend key
+uniqueness remains durable, but the frontend has no automatic cross-session
+recovery. Never use a new key merely to retry an unconfirmed payment.
+
+## Verification
 
 ```powershell
-Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse'
-Push-Location .\frontend
+Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\frontend'
+npm.cmd test
+npm.cmd run typecheck
 npm.cmd run build
-Pop-Location
-.\backend\.venv\Scripts\python.exe -m pip check
-$response = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/health' -UseBasicParsing
-if ($response.StatusCode -ne 200 -or $response.Content -cne '{"status":"ok"}') {
-    throw 'Health endpoint check failed'
-}
-$response.Content
+Set-Location '..\backend'
+$env:DEBUG = 'false'
+$env:PYTHONDONTWRITEBYTECODE = '1'
+$env:SALONPULSE_RUN_DB_TESTS = '1'
+.\.venv\Scripts\python.exe -B -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -B -m alembic current
+.\.venv\Scripts\python.exe -B -m alembic check
 ```
 
-The build checks TypeScript and generates `frontend/dist/`. Python dependencies
-are pinned in `requirements.txt`. The local `backend/.venv/` is ignored by Git.
+Live database tests accept only the guarded local development database; they use
+rollback or uniquely marked fixtures with targeted cleanup. Browser suites require
+running servers and an isolated Chrome CDP session; see the frontend README.
 
-Installation is currently incomplete because registry downloads stalled and
-connections were reset. React is installed, but frontend development tools and
-backend packages still need installation using the commands above. Development
-tools marked `latest` resolve the registry's stable default release. After a
-successful install, pin the resolved versions and use `npm.cmd ci` with the
-completed lockfile. The current lockfile contains only the React installation.
+## Remaining production work
+
+Payments are recorded accounting entries, with no bank/provider settlement checks,
+gateways, refunds or corrections workflow. Receipt timestamps exist, but an
+immutable operator audit trail is not implemented. Per-business transaction locks
+serialize financial and booking operations; production load/latency testing is
+still needed. Direct SQL writers must follow the same locking/validation protocol;
+aggregate overpayment protection is enforced by application transactions rather
+than a database aggregate constraint. Session recovery, deployment hardening,
+monitoring and backup/restore verification remain production-readiness work.

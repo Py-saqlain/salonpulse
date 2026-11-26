@@ -16,7 +16,7 @@ export function AppointmentsPage({ appointments, staff, timezone, ...actions }: 
       <label>Staff member<select value={staffId} onChange={event => setStaffId(event.target.value)}><option value="">All staff</option>{staff.map(member => <option key={member.id} value={member.id}>{member.name}{!member.active ? ' (inactive)' : ''}</option>)}</select></label>
       <button className="filter-reset" onClick={() => { setSearch(''); setDate(''); setStatus(''); setStaffId(''); }}>Clear filters</button>
     </div><p className="filter-summary" role="status">Showing {filtered.length} of {appointments.length} appointments</p>
-    {filtered.length ? <AppointmentList appointments={pagination.visible} showDates {...actions} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Adjust the filters or clear them.' : 'Create your first booking using New appointment.'}</p></div>}
+    {filtered.length ? <AppointmentList appointments={pagination.visible} showDates showPayments {...actions} /> : <div className="empty-appointments"><h3>{appointments.length ? 'No matching appointments' : 'No appointments yet'}</h3><p>{appointments.length ? 'Adjust the filters or clear them.' : 'Create your first booking using New appointment.'}</p></div>}
     <Pagination {...pagination} />
   </section>;
 }

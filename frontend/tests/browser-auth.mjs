@@ -8,6 +8,7 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { waitForCondition } from './browser-readiness.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backend = resolve(root, '../backend');
@@ -20,7 +21,7 @@ import json,sys
 from sqlalchemy import create_engine,select,delete
 from sqlalchemy.engine import make_url
 from app.core.config import Settings
-from app.models import Business,User,Customer,Staff,Service,Appointment
+from app.models import Business,User,Customer,Staff,Service,Appointment,Payment
 markers=json.loads(sys.argv[1]); cleanup=sys.argv[2]=='true'
 url=make_url(Settings().database_url.get_secret_value())
 assert url.drivername=='postgresql+psycopg' and url.host in ('localhost','127.0.0.1','::1') and url.database=='salonpulse_dev' and url.username=='salonpulse_app' and url.port==5432
@@ -33,10 +34,10 @@ try:
     assert len(ids)<=1
     for business_id in ids:
      assert c.scalars(select(User.email).where(User.business_id==business_id)).all()==[marker['email']]
-     for model in (Appointment,Customer,Staff,Service,User): c.execute(delete(model).where(model.business_id==business_id))
+     for model in (Payment,Appointment,Customer,Staff,Service,User): c.execute(delete(model).where(model.business_id==business_id))
      c.execute(delete(Business).where(Business.id==business_id,Business.name==marker['name']))
  with engine.connect() as c:
-  print(json.dumps({model.__tablename__:sorted(str(value) for value in c.scalars(select(model.id))) for model in (Business,User,Customer,Staff,Service,Appointment)}))
+  print(json.dumps({model.__tablename__:sorted(str(value) for value in c.scalars(select(model.id))) for model in (Business,User,Customer,Staff,Service,Appointment,Payment)}))
 finally: engine.dispose()
 `;
   const result = spawnSync(resolve(backend, '.venv/Scripts/python.exe'), ['-B', '-c', code, JSON.stringify(markers), String(cleanup)], { cwd: backend, env: { ...process.env, DEBUG: 'false', PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8' });
@@ -54,6 +55,7 @@ const traffic = [];
 const responses = [];
 let exceptions = 0;
 let checks = 0;
+let interception = null;
 const check = (condition, label) => { if (!condition) throw new Error(label); checks++; };
 async function command(method, params = {}) {
   const id = ++sequence;
@@ -68,17 +70,7 @@ async function evaluate(expression) {
   return result.result.value;
 }
 async function wait(expression, label) {
-  const until = Date.now() + 20000;
-  while (Date.now() < until) {
-    try { if (await evaluate(expression)) return; }
-    catch (error) {
-      // A fresh navigation briefly replaces the execution context. Retry only
-      // that CDP lifecycle condition, never an application script exception.
-      if (!error.navigationContextUnavailable) throw error;
-    }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  throw new Error('Browser condition timed out: ' + label);
+  await waitForCondition(evaluate, expression, label);
 }
 async function route(hash) {
   await evaluate(`location.hash=${JSON.stringify(hash)}`);
@@ -125,6 +117,7 @@ try {
         void command('Fetch.continueRequest', { requestId: data.params.requestId });
         return;
       }
+      if (interception) { void interception(data.params); return; }
       const response = JSON.stringify({ detail: 'Not authenticated' });
       void command('Fetch.fulfillRequest', { requestId: data.params.requestId, responseCode: 401, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Access-Control-Allow-Origin', value: 'http://127.0.0.1:5173' }, { name: 'WWW-Authenticate', value: 'Bearer' }], body: Buffer.from(response).toString('base64') });
     }
@@ -138,7 +131,12 @@ try {
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--dashboard')) {
+  if (process.argv.includes('--payments')) {
+    const { verifyPayments } = await import('./browser-payments.mjs');
+    await verifyPayments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, setInterceptor: value => { interception = value; } });
+    check(exceptions === 0, 'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live payment browser checks.`);
+  } else if (process.argv.includes('--dashboard')) {
     const { verifyDashboard } = await import('./browser-dashboard.mjs');
     await verifyDashboard({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, traffic });
     check(exceptions === 0, 'Browser runtime exceptions');
@@ -230,5 +228,5 @@ try {
   if (pageId) await fetch(cdpOrigin + '/json/close/' + pageId);
   const after = database(true);
   if (after !== baseline) { console.error('FAIL: Database baseline mismatch after cleanup'); process.exitCode = 1; }
-  else console.log('PASS: Temporary businesses/accounts cleaned up; all six tables restored to baseline.');
+  else console.log('PASS: Temporary businesses/accounts cleaned up; all seven tables restored to baseline.');
 }

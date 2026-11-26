@@ -179,8 +179,40 @@ Chrome debugging session, set `$env:SALONPULSE_CDP_URL='http://127.0.0.1:9224'`.
 After renaming modules that differ only by case, restart Vite if its development
 module graph retains an old path; the production compiler uses the current files.
 
-The unit suite now contains 61 tests. The earlier 56-to-36 count change came from
+The Day 7 unit suite contained 61 tests. The earlier 56-to-36 count change came from
 replacing 33 demo-era customer/storage tests with eight API-era domain tests and
 adding five dashboard tests. A further 25 API regression tests preserve relevant
 validation, history, snapshot, availability, pagination and isolation coverage.
 Obsolete demo-storage migration behavior is no longer part of the application.
+
+
+## Appointment payments
+
+Owners and staff can record full/partial payments and inspect balances and
+paginated history through the authenticated backend APIs. Methods are cash,
+bank transfer, JazzCash and Easypaisa; references are optional. Amounts use
+integer paisa validation and decimal-string API payloads. Cancelled appointments
+cannot receive new payments. Balances refresh after successful requests.
+
+The session-owned ledger coalesces duplicate submissions and retains the same
+UUID request key and immutable payload after network/server uncertainty. Closing
+the dialog, filtering and navigating do not discard that pending attempt. Retry
+confirms the original receipt; Record another payment explicitly begins a new one.
+Keys exist only in one authenticated app instance: reload, logout/expiry, tab
+closure or a crash loses local recovery state, and another tab has its own ledger.
+Backend idempotency records remain durable. Reconcile receipt history before
+recording after a lost session; a fresh key can create another partial receipt.
+There is no automatic cross-session recovery or bank/provider reconciliation.
+
+The suite contains 76 unit tests, including exact money, validation, pagination,
+response identity, duplicate requests, lost-response retries and browser-readiness
+regressions. Run `node tests/browser-auth.mjs --payments` with the documented CDP
+setup to verify two businesses, persistence, mobile layout and staff permissions.
+The suite drops a committed response and proves that retrying after navigation
+creates no duplicate receipt. Cleanup checks all seven tables and deletes only
+uniquely marked temporary fixtures, with payments removed before appointments.
+
+Readiness predicates return booleans before CDP serialization, and inherited
+fieldset-disabled state is tested with `:disabled`. Financial role permissions
+currently allow both owner and staff. Immutable operator attribution, refunds,
+correction workflows and production load testing are not implemented.

@@ -1,8 +1,9 @@
 import type { Appointment } from './data';
 import { formatPKR, formatTime, startsAt } from './data';
+import { AppointmentPayment } from './AppointmentPayment';
 
 export type AppointmentActions = { onEdit?: (item: Appointment) => void; onStatus?: (item: Appointment, status: 'In progress' | 'Completed' | 'Cancelled') => void; disabled?: boolean };
-export function AppointmentList({ appointments, showDates = false, onEdit, onStatus, disabled }: AppointmentActions & { appointments: Appointment[]; showDates?: boolean }) {
+export function AppointmentList({ appointments, showDates = false, showPayments = false, onEdit, onStatus, disabled }: AppointmentActions & { appointments: Appointment[]; showDates?: boolean; showPayments?: boolean }) {
   if (!appointments.length) return <p className="empty-appointments">No appointments yet. Create a booking to get started.</p>;
   return <div className="appointment-list">{appointments.map(item => <article className="appointment" key={item.id} data-appointment-id={item.id}>
     <div className="appointment-time"><strong>{formatTime(item)}</strong>{showDates && <span>{item.date}</span>}<span>{item.minutes} min</span></div>
@@ -15,5 +16,6 @@ export function AppointmentList({ appointments, showDates = false, onEdit, onSta
       {item.status === 'In progress' && <button disabled={disabled} onClick={() => onStatus(item, 'Completed')}>Complete</button>}
       <button disabled={disabled} className="cancel-booking" onClick={() => onStatus(item, 'Cancelled')}>Cancel appointment</button>
     </div>}
+    {showPayments && <AppointmentPayment appointment={item} disabled={disabled} />}
   </article>)}</div>;
 }

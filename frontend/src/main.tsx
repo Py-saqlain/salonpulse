@@ -2,6 +2,7 @@ import { Dashboard } from './Dashboard';
 import { AppointmentsPage } from './AppointmentsPage';
 import { AuthProvider, useAuth } from './AuthContext';
 import { AuthPage } from './AuthPage';
+import { PaymentProvider } from './PaymentContext';
 import { useCatalog } from './useCatalog';
 import { ServicesPage } from './ServicesPage';
 import { StaffPage } from './StaffPage';
@@ -111,7 +112,7 @@ function AuthGate() {
     update(); window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, [session]);
-  return session ? <App key={session.key} /> : <AuthPage key={hash === '#register' ? 'register' : 'login'} register={hash === '#register'} />;
+  return session ? <PaymentProvider key={session.key}><App /></PaymentProvider> : <AuthPage key={hash === '#register' ? 'register' : 'login'} register={hash === '#register'} />;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><AuthProvider><AuthGate /></AuthProvider></StrictMode>);
 
