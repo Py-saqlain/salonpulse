@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, UUID4, field_validator
 
-from app.models import PaymentMethod
+from app.models import PaymentMethod, PaymentIntentState
 from app.schemas.resources import ResourceInput
 from app.services.payments import PaymentState
 
@@ -61,4 +61,15 @@ class PaymentHistory(BaseModel):
     total: int
     limit: int
     offset: int
+    summary: PaymentSummaryResponse
+
+
+class PaymentRecoveryResponse(BaseModel):
+    intent_id: UUID
+    business_id: UUID
+    user_id: UUID
+    appointment_id: UUID
+    state: PaymentIntentState
+    resolved: bool
+    payload: PaymentCreate | None
     summary: PaymentSummaryResponse

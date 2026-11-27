@@ -5,7 +5,7 @@ import type { BusinessProfile, Credentials, Registration, UserProfile } from './
 import { checkIdentity, tokenExpiresAt } from './session';
 
 type Session = { user: UserProfile; business: BusinessProfile; expiresAt: number; key: number };
-type Auth = { session: Session | null; busy: boolean; message: string; api: ApiClient; login: (data: Credentials) => Promise<void>; register: (data: Registration) => Promise<void>; logout: () => void };
+type Auth = { session: Session | null; busy: boolean; message: string; api: ApiClient; login: (data: Credentials) => Promise<void>; register: (data: Registration) => Promise<void>; logout: () => void; isSessionCurrent: (key: number) => boolean };
 const Context = createContext<Auth | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { clearTimeout(timer); window.removeEventListener('focus', check); document.removeEventListener('visibilitychange', check); };
   }, [session]);
 
-  return <Context.Provider value={{ session, busy, message, api, login: data => authenticate(data), register: data => authenticate(data, data), logout: () => clear('You have been logged out.') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ session, busy, message, api, login: data => authenticate(data), register: data => authenticate(data, data), logout: () => clear('You have been logged out.'), isSessionCurrent: key => generation.current === key && token.current !== null }}>{children}</Context.Provider>;
 }
 
 export function useAuth() {

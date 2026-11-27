@@ -71,3 +71,7 @@ def get_current_business(
 
 def get_tenant_scope(user: Annotated[User, Depends(require_owner_or_staff)]) -> TenantScope:
     return TenantScope(business_id=user.business_id)
+
+
+def get_owner_scope(user: Annotated[User, Depends(require_owner)]) -> TenantScope:
+    return TenantScope(business_id=user.business_id)

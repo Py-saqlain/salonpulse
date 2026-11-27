@@ -104,6 +104,8 @@ test('production frontend contains no legacy business storage or sample director
   const root = new URL('../src/', import.meta.url);
   for (const name of readdirSync(root).filter(name => /\.tsx?$/.test(name))) {
     const source = readFileSync(new URL(name, root), 'utf8');
-    assert.doesNotMatch(source, /\b(localStorage|sessionStorage|seedCustomers|seedStaff|seedServices|seedAppointments|loadStore|STORAGE_KEY|DemoStore)\b/, name);
+    assert.doesNotMatch(source, /\b(sessionStorage|seedCustomers|seedStaff|seedServices|seedAppointments|loadStore|STORAGE_KEY|DemoStore)\b/, name);
+    if (name !== "PaymentContext.tsx") assert.doesNotMatch(source, /\blocalStorage\b/, name);
+    if (name === "PaymentContext.tsx") { assert.match(source, /storage: \(\) => localStorage/); assert.doesNotMatch(source, /setItem|getItem/); }
   }
 });

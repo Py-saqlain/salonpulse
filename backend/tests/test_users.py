@@ -75,7 +75,8 @@ class UserModelTests(unittest.TestCase):
         self.assertEqual(str(CreateIndex(unique).compile(dialect=self.dialect)),
                          "CREATE UNIQUE INDEX uq_users_email ON users (lower(email))")
         self.assertIsNone(unique.dialect_options["postgresql"]["where"])
-        self.assertFalse(any(isinstance(item, UniqueConstraint) for item in self.table.constraints))
+        self.assertFalse(any(isinstance(item, UniqueConstraint) and "email" in item.columns for item in self.table.constraints))
+        self.assertTrue(any(isinstance(item, UniqueConstraint) and set(item.columns.keys()) == {"business_id", "id"} for item in self.table.constraints))
         business_index = next(index for index in self.table.indexes if index.name == "ix_users_business_id")
         self.assertFalse(business_index.unique)
         self.assertEqual(list(business_index.columns.keys()), ["business_id"])
@@ -130,7 +131,7 @@ class UserMigrationTests(unittest.TestCase):
     def test_revision_depends_on_initial_and_is_the_only_head(self):
         self.assertEqual(self.revision.down_revision, "b56e17b6641d")
         self.assertEqual(self.revision.doc, "add users table")
-        self.assertEqual(self.heads, ["9b54ee7f2482"])
+        self.assertEqual(self.heads, ["894cc829413f"])
 
     def test_upgrade_only_creates_users_and_its_two_indexes(self):
         self.assertEqual([type(statement) for statement in self.statements], [CreateTable, CreateIndex, CreateIndex])
@@ -166,7 +167,7 @@ class UserMigrationTests(unittest.TestCase):
                                  tuple(element.target_fullname for element in constraint.elements), constraint.ondelete)
             return result + (tuple(constraint.columns.keys()),)
         self.assertEqual({signature(c) for c in self.statements[0].element.constraints},
-                         {signature(c) for c in User.__table__.constraints})
+                         {signature(c) for c in User.__table__.constraints if str(c.name) != "uq_users_business_id"})
 
     def test_downgrade_definition_only_targets_users_without_execution(self):
         statements = []

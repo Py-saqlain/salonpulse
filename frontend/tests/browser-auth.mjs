@@ -21,7 +21,7 @@ import json,sys
 from sqlalchemy import create_engine,select,delete
 from sqlalchemy.engine import make_url
 from app.core.config import Settings
-from app.models import Business,User,Customer,Staff,Service,Appointment,Payment
+from app.models import Business,User,Customer,Staff,Service,Appointment,Payment,PaymentIntent
 markers=json.loads(sys.argv[1]); cleanup=sys.argv[2]=='true'
 url=make_url(Settings().database_url.get_secret_value())
 assert url.drivername=='postgresql+psycopg' and url.host in ('localhost','127.0.0.1','::1') and url.database=='salonpulse_dev' and url.username=='salonpulse_app' and url.port==5432
@@ -34,10 +34,10 @@ try:
     assert len(ids)<=1
     for business_id in ids:
      assert c.scalars(select(User.email).where(User.business_id==business_id)).all()==[marker['email']]
-     for model in (Payment,Appointment,Customer,Staff,Service,User): c.execute(delete(model).where(model.business_id==business_id))
+     for model in (PaymentIntent,Payment,Appointment,Customer,Staff,Service,User): c.execute(delete(model).where(model.business_id==business_id))
      c.execute(delete(Business).where(Business.id==business_id,Business.name==marker['name']))
  with engine.connect() as c:
-  print(json.dumps({model.__tablename__:sorted(str(value) for value in c.scalars(select(model.id))) for model in (Business,User,Customer,Staff,Service,Appointment,Payment)}))
+  print(json.dumps({model.__tablename__:sorted(str(value) for value in c.scalars(select(model.id))) for model in (Business,User,Customer,Staff,Service,Appointment,Payment,PaymentIntent)}))
 finally: engine.dispose()
 `;
   const result = spawnSync(resolve(backend, '.venv/Scripts/python.exe'), ['-B', '-c', code, JSON.stringify(markers), String(cleanup)], { cwd: backend, env: { ...process.env, DEBUG: 'false', PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8' });
@@ -175,7 +175,7 @@ try {
   await evaluate('(() => { const input=document.querySelector(".customer-editor input"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"SESSION A PRIVATE CUSTOMER"); input.dispatchEvent(new Event("input",{bubbles:true})); })()');
   await evaluate('document.querySelector(".customer-editor").requestSubmit()');
   await wait('document.body.textContent.includes("SESSION A PRIVATE CUSTOMER")', 'demo customer creation');
-  check(await evaluate('Object.keys(localStorage).length===1 && sessionStorage.length===0'), 'Session data or token persisted');
+  check(await evaluate(`(()=>{const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;return sessionStorage.length===0 && Object.keys(localStorage).every(key=>{if(key==='salonpulse.demo.v4')return true;const parts=key.split(':');if(parts.length!==4||parts[0]!=='salonpulse.payment-recovery.v1'||!parts.slice(1).every(id=>uuid.test(id)))return false;const value=JSON.parse(localStorage.getItem(key));return Object.keys(value).join(',')==='intent_id'&&uuid.test(value.intent_id);});})()`), 'Session data, tokens or sensitive payment data persisted');
   await logout();
   await route('register'); await submit(accounts[1]); await wait('!!document.querySelector(".app-shell")', 'second registration');
   check(await evaluate(`document.querySelector('.workspace strong').textContent===${JSON.stringify(accounts[1].business_name)} && !document.body.textContent.includes('SESSION A PRIVATE CUSTOMER')`), 'Previous tenant leaked into second account');
@@ -226,12 +226,12 @@ try {
       console.error('Safe UI diagnostics:', state);
     } catch { console.error('UI diagnostics unavailable during navigation.'); }
   }
-  console.error('HTTP status diagnostics:', JSON.stringify(responses));
+  console.error('HTTP status diagnostics:', JSON.stringify(responses.slice(-30)));
 } finally {
   socket?.close();
   for (const request of pending.values()) clearTimeout(request.timer);
   if (pageId) await fetch(cdpOrigin + '/json/close/' + pageId);
   const after = database(true);
   if (after !== baseline) { console.error('FAIL: Database baseline mismatch after cleanup'); process.exitCode = 1; }
-  else console.log('PASS: Temporary businesses/accounts cleaned up; all seven tables restored to baseline.');
+  else console.log('PASS: Temporary businesses/accounts cleaned up; all eight tables restored to baseline.');
 }

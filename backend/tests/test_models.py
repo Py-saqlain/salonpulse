@@ -25,7 +25,7 @@ class ModelTests(unittest.TestCase):
             configure_mappers()
 
     def test_all_models_registered_and_postgresql_ddl_compiles(self):
-        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments", "users", "payments"})
+        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments", "users", "payments", "payment_intents"})
         for table in Base.metadata.sorted_tables:
             ddl = str(CreateTable(table).compile(dialect=self.dialect))
             self.assertIn("CREATE TABLE", ddl)

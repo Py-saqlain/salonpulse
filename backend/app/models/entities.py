@@ -151,6 +151,7 @@ class User(TenantRecord, Base):
 
     __tablename__ = "users"
     __table_args__ = (
+        UniqueConstraint("business_id", "id"),
         CheckConstraint("length(trim(full_name)) > 0", name="full_name_not_blank"),
         CheckConstraint("length(trim(email)) > 0 AND email = lower(trim(email))", name="normalized_email"),
         CheckConstraint("length(trim(password_hash)) > 0", name="password_hash_not_blank"),
@@ -243,6 +244,9 @@ class Payment(TenantRecord, Base):
 
     __tablename__ = "payments"
     __table_args__ = (
+        UniqueConstraint("business_id", "id"),
+        ForeignKeyConstraint(["business_id", "recorded_by_id"], ["users.business_id", "users.id"],
+                             name="fk_payments_business_actor", ondelete="RESTRICT"),
         UniqueConstraint("business_id", "idempotency_key", name="uq_payments_business_idempotency"),
         CheckConstraint("(idempotency_key IS NULL AND request_fingerprint IS NULL) OR "
                         "(idempotency_key IS NOT NULL AND request_fingerprint IS NOT NULL)", name="idempotency_pair"),
@@ -259,6 +263,7 @@ class Payment(TenantRecord, Base):
         Uuid(as_uuid=True), ForeignKey("businesses.id", ondelete="RESTRICT"),
     )
     appointment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    recorded_by_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     currency: Mapped[str] = mapped_column(String(3), default="PKR", server_default="PKR")
     method: Mapped[PaymentMethod] = mapped_column(enum_column(PaymentMethod, "payment_method"))
@@ -276,3 +281,40 @@ class Payment(TenantRecord, Base):
     @validates("method")
     def validate_method(self, key: str, value: PaymentMethod | str) -> PaymentMethod:
         return PaymentMethod(value)
+
+
+class PaymentIntentState(str, Enum):
+    PENDING = "pending"
+    RECORDED = "recorded"
+    CANCELLED = "cancelled"
+
+
+class PaymentIntent(TenantRecord, Base):
+    """Durable, actor-scoped payment recovery. Payload never goes in browser storage."""
+
+    __tablename__ = "payment_intents"
+    __table_args__ = (
+        ForeignKeyConstraint(["business_id", "appointment_id"], ["appointments.business_id", "appointments.id"],
+                             name="fk_payment_intents_business_appointment", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["business_id", "user_id"], ["users.business_id", "users.id"],
+                             name="fk_payment_intents_business_user", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["business_id", "receipt_id"], ["payments.business_id", "payments.id"],
+                             name="fk_payment_intents_business_receipt", ondelete="RESTRICT"),
+        CheckConstraint("amount IS NULL OR (amount > 0 AND amount <> 'NaN'::numeric)", name="positive_amount"),
+        CheckConstraint("state = 'cancelled' OR (amount IS NOT NULL AND method IS NOT NULL AND request_fingerprint IS NOT NULL)", name="payload_required"),
+        CheckConstraint("(state = 'recorded' AND receipt_id IS NOT NULL) OR (state <> 'recorded' AND receipt_id IS NULL)", name="receipt_state"),
+        CheckConstraint("state <> 'pending' OR resolved_at IS NULL", name="pending_unresolved"),
+        CheckConstraint("state <> 'cancelled' OR resolved_at IS NOT NULL", name="cancelled_resolved"),
+        Index("uq_payment_intents_unresolved", "business_id", "user_id", "appointment_id", unique=True,
+              postgresql_where=text("resolved_at IS NULL")),
+    )
+    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    appointment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    state: Mapped[PaymentIntentState] = mapped_column(enum_column(PaymentIntentState, "payment_intent_state"))
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    method: Mapped[PaymentMethod | None] = mapped_column(enum_column(PaymentMethod, "payment_intent_method"))
+    reference: Mapped[str | None] = mapped_column(String(200))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    receipt_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

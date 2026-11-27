@@ -3,6 +3,7 @@ import { revenueMoney, trendPoints } from './revenueMetrics';
 import type { RevenueView } from './useRevenueAnalytics';
 
 export function RevenuePanel({ analytics }: { analytics: RevenueView }) {
+  if (!analytics.allowed) return <section className="panel empty-appointments"><h2>Owner access required</h2><p>Financial reporting is available to the salon owner.</p></section>;
   const { data, available, loading, error, refresh } = analytics;
   return <section className="panel revenue-panel" aria-label="Revenue analytics" data-revenue-ready={available}>
     <div className="panel-heading"><div><h2>Collections & balances</h2><p>Recorded payments in PKR{data ? ` | ${data.timezone}` : ''}. Unpaid bookings are excluded from collections.</p></div><button className="filter-reset" disabled={loading} onClick={refresh}>Refresh revenue</button></div>

@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.core.config import Settings
 from app.db.base import Base
 import app.models
-from app.models import Business, User, Payment, Appointment, Customer, Staff, Service
+from app.models import Business, User, Payment, PaymentIntent, Appointment, Customer, Staff, Service
 from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.engine import make_url
 
@@ -36,7 +36,7 @@ def main():
     assert url.host in ('127.0.0.1', 'localhost', '::1')
     engine = create_engine(url, hide_parameters=True)
     with engine.connect() as connection:
-        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '9b54ee7f2482'
+        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '894cc829413f'
         baseline = {name: set(connection.scalars(select(table.c.id))) for name, table in Base.metadata.tables.items()}
     marker = '__payment_http__' + uuid4().hex
     accounts = [dict(business_name=marker + str(i), full_name='Payment HTTP owner',
@@ -45,7 +45,7 @@ def main():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
     origin = f'http://127.0.0.1:{port}'
-    process = subprocess.Popen([sys.executable, '-B', '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', str(port)],
+    process = subprocess.Popen([sys.executable, '-B', '-m', 'app.serve', '--host', '127.0.0.1', '--port', str(port)],
         cwd=Path(__file__).resolve().parents[1], env={**os.environ, 'DEBUG': 'false', 'PYTHONDONTWRITEBYTECODE': '1'},
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     checks = 0
@@ -158,7 +158,25 @@ def main():
         staff_booking = new_booking(4)
         staff_path = '/api/appointments/' + staff_booking['id'] + '/payments'
         create(staff_path, receipt('1000'), token)
-        check(call('GET', staff_path, token=token)[1]['summary']['state'] == 'paid', 'Staff payment permission failed')
+        check(call('GET', staff_path, token=token)[0] == 403, 'Staff history permission failed')
+        check(call('GET', '/api/appointments/' + staff_booking['id'] + '/payment-summary', token=token)[1]['state'] == 'paid', 'Staff balance permission failed')
+        check(call('GET', '/api/analytics/revenue', token=token)[0] == 403, 'Staff analytics permission failed')
+        recovery_booking=new_booking(5)
+        recovery_path='/api/appointments/'+recovery_booking['id']+'/payment-intents'
+        pending=create(recovery_path,receipt('250'),token)
+        intent_path=recovery_path+'/'+pending['intent_id']
+        check(call('GET',recovery_path+'/active',token=token)[1]['state']=='pending','Pending recovery discovery failed')
+        check(call('POST',intent_path+'/confirm',token=tokens[1])[0]==404,'Foreign intent confirmed')
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results=[f.result() for f in [executor.submit(call,'POST',intent_path+'/confirm',None,token) for _ in range(2)]]
+        check(all(r[0]==200 and r[1]['state']=='recorded' and r[1]['payload'] is None for r in results),'Concurrent recovery failed')
+        check(call('GET','/api/appointments/'+recovery_booking['id']+'/payment-summary',token=token)[1]['total_paid']=='250.00','Recovery charged twice')
+        check(call('POST',intent_path+'/reconcile',token=token)[1]['state']=='recorded','Durable recorded outcome lost')
+        check(call('POST',intent_path+'/acknowledge',token=token)[0]==200,'Outcome acknowledgment failed')
+        unknown=receipt('100');unknown_path=recovery_path+'/'+unknown['idempotency_key']
+        check(call('POST',unknown_path+'/reconcile',token=token)[1]['state']=='cancelled','Unknown request not closed')
+        check(call('POST',recovery_path,unknown,token)[0]==409,'Delayed creation bypassed tombstone')
+        check(call('POST',unknown_path+'/confirm',token=token)[0]==409,'Closed request charged')
         check(call('GET', '/health') == (200, {'status': 'ok'}), 'Health failed')
         check(call('GET', '/health/db') == (200, {'status': 'ok'}), 'Database health failed')
         print(f'PASS: {checks} real HTTP payment checks across two businesses.')
@@ -177,13 +195,13 @@ def main():
                     assert account['business_name'].startswith(marker)
                     users = connection.execute(select(User.email).where(User.business_id == business_id)).scalars().all()
                     assert users == [account['email']], 'Unexpected fixture membership; cleanup refused'
-                    for model in (Payment, Appointment, Customer, Staff, Service, User):
+                    for model in (PaymentIntent, Payment, Appointment, Customer, Staff, Service, User):
                         connection.execute(delete(model).where(model.business_id == business_id))
                     connection.execute(delete(Business).where(Business.id == business_id, Business.name == account['business_name']))
             with engine.connect() as connection:
                 after = {name: set(connection.scalars(select(table.c.id))) for name, table in Base.metadata.tables.items()}
                 assert after == baseline, 'Database baseline mismatch after cleanup'
-            print('PASS: HTTP fixtures removed; all seven application tables restored to original record IDs.')
+            print('PASS: HTTP fixtures removed; all eight application tables restored to original record IDs.')
         finally:
             engine.dispose()
 

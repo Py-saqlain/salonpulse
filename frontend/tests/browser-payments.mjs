@@ -15,7 +15,11 @@ export async function verifyPayments({ accounts, command, evaluate, wait, route,
     return { status: result.status, data: result.status === 204 ? null : await result.json() };
   }
   async function post(index, resource, body) { const result = await api(index, resource, 'POST', body); check(result.status === 201, resource + ' payment fixture'); return result.data; }
-  async function click(text, scope = 'document') { await evaluate(`([...${scope}.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)})).click()`); }
+  async function click(text, scope = 'document') {
+    await wait(`!![...(${scope}?.querySelectorAll('button') ?? [])].find(b=>b.textContent.trim()===${JSON.stringify(text)} && !b.disabled)`, 'ready payment action: ' + text);
+    await evaluate(`([...${scope}.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)})).click()`);
+    if (text === 'Record another payment' || text === 'Start new payment') await wait('!!document.querySelector(".payment-form") && !document.querySelector("[name=payment_amount]").matches(":disabled")', 'new payment form ready');
+  }
   async function set(selector, value) {
     await evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});const prototype=input instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   }
@@ -26,7 +30,8 @@ export async function verifyPayments({ accounts, command, evaluate, wait, route,
   const dialog = 'document.querySelector("[data-payment-dialog]")';
   async function open(id, record = true) {
     await appointments(); await wait(`${row(id)}?.querySelector('.payment-status')`, 'row payment balance');
-    await click(record ? 'Record payment' : 'Payment history', row(id));
+    const label = record ? 'Record payment' : await evaluate(`${row(id)}.textContent.includes('Payment history') ? 'Payment history' : 'Balance and recovery'`);
+    await click(label, row(id));
     await wait('!!document.querySelector("[data-payment-dialog][open]") && !document.querySelector("[data-payment-dialog]").textContent.includes("Loading payments...")', 'payment dialog');
     if (record && await evaluate('[...document.querySelectorAll("[data-payment-dialog] button")].some(b=>b.textContent==="Record another payment" && !b.disabled)')) await click('Record another payment', dialog);
   }
@@ -91,25 +96,31 @@ finally:e.dispose()
   // Drop only a committed POST response, then retry the same real API request.
   let dropped = false;
   setInterceptor(async params => {
-    if (!dropped && params.request.method === 'POST' && params.responseStatusCode === 201) {
+    if (!dropped && params.request.method === 'POST' && params.responseStatusCode === 200 && params.request.url.endsWith('/confirm')) {
       dropped = true; await command('Fetch.failRequest', { requestId: params.requestId, errorReason: 'ConnectionClosed' });
     } else await command('Fetch.continueRequest', { requestId: params.requestId });
   });
-  await command('Fetch.enable', { patterns: [{ urlPattern: '*8000/api/appointments/*/payments', requestStage: 'Response' }] });
+  await command('Fetch.enable', { patterns: [{ urlPattern: '*8000/api/appointments/*/payment-intents/*/confirm', requestStage: 'Response' }] });
   await evaluate('document.querySelector(".payment-form").requestSubmit();document.querySelector(".payment-form").requestSubmit()');
-  await wait('[...document.querySelectorAll(".payment-form button")].some(b=>b.textContent==="Retry same payment" && !b.disabled)', 'uncertain payment retry');
+  await wait('document.querySelector("[data-payment-dialog]").textContent.includes("Payment recorded.") && !document.querySelector("[data-payment-dialog]").textContent.includes("Loading payments...")', 'automatic lost-response reconciliation');
   await command('Fetch.disable'); setInterceptor(null);
   check(dropped, 'Committed response was not intercepted');
   check((await serverHistory(bookings[0].id)).total === 3, 'Duplicate submit produced extra receipt');
-  await close(); await evaluate('location.hash="customers"'); await wait('!!document.querySelector(".customer-layout")', 'navigate away from uncertain payment');
-  await open(bookings[0].id);
-  check(await evaluate('document.querySelector("[name=payment_reference]").value==="Jazz retry" && document.querySelector("[name=payment_amount]").matches(":disabled")'), 'Uncertain request details lost or editable');
-  await click('Retry same payment', dialog);
-  await wait('document.querySelector("[data-payment-dialog] .payment-success")?.textContent.includes("Payment recorded.")', 'idempotent UI retry');
+  const recoveryKey = await evaluate(`Object.keys(localStorage).find(k=>k.startsWith('salonpulse.payment-recovery.v1:') && k.endsWith(':${bookings[0].id}'))`);
+  check(!!recoveryKey, 'Persistent recovery pointer missing');
+  const pointer = await evaluate(`localStorage.getItem(${JSON.stringify(recoveryKey)})`);
+  check(Object.keys(JSON.parse(pointer)).join(',') === 'intent_id', 'Sensitive payment data persisted');
+  // A fresh document loses the in-memory JWT and ledger. Login must reconcile the prior receipt.
+  await close(); await command('Page.navigate', { url: 'http://127.0.0.1:5173/?recovery=' + randomUUID() + '#appointments' });
+  await wait('!!document.querySelector(".auth-form")','refresh requires reauthentication');
+  await login(accounts[0]); await open(bookings[0].id, false);
+  await wait('document.querySelector("[data-payment-dialog]").textContent.includes("Payment recorded.")','persistent payment recovery');
   await totals('350.50', '649.50', 'Partially paid');
-  check((await serverHistory(bookings[0].id)).total === 3, 'Retry charged twice');
+  check((await serverHistory(bookings[0].id)).total === 3, 'Refresh recovery charged twice');
   await click('Record another payment', dialog); await save('149.50', 'easypaisa', 'Easy reference'); await totals('500.00', '500.00', 'Partially paid');
   await close();
+  const activeIntent = await api(0, 'appointments/' + bookings[0].id + '/payment-intents/active');
+  if (activeIntent.data) check((await api(0, 'appointments/' + bookings[0].id + '/payment-intents/' + activeIntent.data.intent_id + '/acknowledge', 'POST')).status === 200, 'Acknowledge fixture outcome');
   for (let i = 0; i < 8; i++) await post(0, 'appointments/' + bookings[0].id + '/payments', { amount: '10.00', method: 'cash', idempotency_key: randomUUID(), reference: 'History receipt ' + i });
   await open(bookings[0].id); await totals('580.00', '420.00', 'Partially paid');
   check(await evaluate('document.querySelectorAll(".payment-receipt").length===10'), 'History first-page size');
@@ -122,6 +133,7 @@ finally:e.dispose()
   await click('Refresh payments', dialog); await totals('580.00', '420.00', 'Partially paid');
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   check(await evaluate('document.querySelector("[data-payment-dialog]").scrollWidth<=document.querySelector("[data-payment-dialog]").clientWidth+1 && document.documentElement.scrollWidth<=innerWidth+1'), 'Mobile payment overflow');
+  if (await evaluate('[...document.querySelectorAll("[data-payment-dialog] button")].some(b=>b.textContent==="Record another payment")')) { await click('Record another payment', dialog); await wait('!!document.querySelector(".payment-form") && !document.querySelector("[name=payment_amount]").matches(":disabled")','new payment ready'); }
   await save('420.00', 'cash'); await totals('1,000.00', '0.00', 'Paid'); await close();
   check(await evaluate(`${row(bookings[0].id)}.textContent.includes('Paid') && !${row(bookings[0].id)}.querySelector('.record-payment')`), 'Paid appointment still offers record action');
   await command('Emulation.setDeviceMetricsOverride', { width: 1365, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -130,9 +142,10 @@ finally:e.dispose()
   await refresh(); await open(conflict.id);
   await post(0, 'appointments/' + conflict.id + '/payments', { amount: '750.00', method: 'cash', idempotency_key: randomUUID() });
   await set('[name=payment_amount]', '500.00'); await evaluate('document.querySelector(".payment-form").requestSubmit()');
-  await wait('document.querySelector(".payment-form [role=alert]")?.textContent.includes("exceeds")', 'stale balance conflict');
+  await wait('document.querySelector("[data-payment-dialog] [role=alert]")?.textContent.includes("exceeds")', 'stale balance conflict');
   await totals('750.00', '250.00', 'Partially paid');
   check(await evaluate('document.querySelector("[name=payment_amount]").value==="500.00"'), 'Conflict discarded draft');
+  await click('Start new payment', dialog); await wait('!!document.querySelector(".payment-form") && !document.querySelector("[name=payment_amount]").matches(":disabled")','corrected payment ready');
   await save('250.00', 'cash'); await totals('1,000.00', '0.00', 'Paid'); await close();
   const cancelled = await post(0, 'appointments', { ...payloads[0], starts_at: new Date(start.getTime() + 7200000).toISOString() });
   check((await api(0, 'appointments/' + cancelled.id, 'DELETE')).status === 204, 'Cancel fixture'); await refresh();
@@ -140,6 +153,26 @@ finally:e.dispose()
   check(await evaluate(`!${row(cancelled.id)}.querySelector('.record-payment')`), 'Cancelled appointment offers payment action');
   await open(cancelled.id, false);
   check(await evaluate('!document.querySelector(".payment-form") && document.querySelector("[data-payment-dialog]").textContent.includes("cancelled")'), 'Cancelled payment form exposed'); await close();
+  // Recover a server-side pending request after losing both session and browser pointer.
+  const recoveredBooking = await post(0, 'appointments', { ...payloads[0], starts_at: new Date(start.getTime() + 14400000).toISOString() });
+  const pendingData = { amount:'225.50', method:'jazzcash', reference:'Recovered server-only reference', idempotency_key:randomUUID() };
+  await post(0,'appointments/' + recoveredBooking.id + '/payment-intents',pendingData);
+  await logout(); await login(accounts[0]); await refresh(); await open(recoveredBooking.id);
+  check(await evaluate('document.querySelector("[name=payment_amount]").value === "225.50" && document.querySelector("[name=payment_amount]").matches(":disabled")'), 'Server pending recovery lost frozen details');
+  await click('Confirm previous payment',dialog); await totals('225.50','774.50','Partially paid');
+  check((await serverHistory(recoveredBooking.id)).total===1,'Recovered pending request duplicated');
+  await click('Record another payment',dialog); await close();
+  const secondIntent = await post(0,'appointments/' + recoveredBooking.id + '/payment-intents',{amount:'100',method:'cash',idempotency_key:randomUUID()});
+  const concurrentResults=await Promise.all([0,1].map(()=>api(0,'appointments/' + recoveredBooking.id + '/payment-intents/' + secondIntent.intent_id + '/confirm','POST')));
+  check(concurrentResults.every(r=>r.status===200 && r.data.state==='recorded'),'Concurrent recovery confirmation failed');
+  check((await serverHistory(recoveredBooking.id)).total===2,'Concurrent recovery charged more than once');
+  await open(recoveredBooking.id,false); await totals('325.50','674.50','Partially paid'); await click('Record another payment',dialog); await close();
+  const cancelledIntent=await post(0,'appointments/' + recoveredBooking.id + '/payment-intents',{amount:'50',method:'cash',idempotency_key:randomUUID()});
+  await open(recoveredBooking.id,false); await click('Cancel pending request',dialog);
+  await wait('!!document.querySelector(".payment-form") && !document.querySelector("[name=payment_amount]").matches(":disabled")','cancelled pending recovery');
+  check((await serverHistory(recoveredBooking.id)).total===2,'Cancelled intent charged');
+  check((await api(0,'appointments/' + recoveredBooking.id + '/payment-intents/' + cancelledIntent.intent_id + '/confirm','POST')).status===409,'Cancelled intent confirmed later');
+  await close();
   await logout(); await login(accounts[0]); await open(bookings[0].id, false); await totals('1,000.00', '0.00', 'Paid'); await close();
   await logout(); await route('register'); await submit(accounts[1]); await ready(); await seed(1); await refresh(); await open(bookings[1].id);
   await totals('0.00', '1,000.00', 'Unpaid');
@@ -150,7 +183,10 @@ finally:e.dispose()
   await logout(); promoteToStaff(); await login(accounts[0]); await appointments();
   const staffBooking = await post(0, 'appointments', { ...payloads[0], starts_at: new Date(start.getTime() + 10800000).toISOString() });
   await refresh(); await open(staffBooking.id); await save('1000.00', 'cash', 'Staff receipt'); await totals('1,000.00', '0.00', 'Paid'); await close();
-  check((await serverHistory(bookings[0].id)).summary.total_paid === '1000.00', 'Original tenant totals changed');
+  check((await api(0,'appointments/' + bookings[0].id + '/payments')).status === 403, 'Staff history permission');
+  check((await api(0,'analytics/revenue')).status === 403, 'Staff analytics permission');
+  check((await api(0,'appointments/' + bookings[0].id + '/payment-summary')).data.total_paid === '1000.00', 'Staff necessary balance');
+  check(await evaluate('!Array.from(document.links).some(a=>a.hash==="#analytics") && !document.querySelector(".payment-history")'), 'Staff financial UI exposed');
   check((await serverHistory(bookings[1].id, 1)).summary.total_paid === '1000.00', 'Second tenant totals changed');
   await logout();
 }

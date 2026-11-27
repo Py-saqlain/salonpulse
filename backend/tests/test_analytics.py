@@ -84,7 +84,7 @@ class RevenueDatabaseTests(AppointmentFixture):
     def test_auth_permissions_tenant_isolation_and_query_validation(self):
         self.fixtures()
         self.assertEqual(self.analytics(anonymous=True)[0], 401)
-        self.assertEqual(self.analytics(user=self.staff_user)[0], 200)
+        self.assertEqual(self.analytics(user=self.staff_user)[0], 403)
         foreign = self.analytics(user=self.owner_b)[2]
         self.assertEqual(foreign['daily']['collected'], '1000.00')
         self.assertEqual(foreign['appointment_counts'], dict(paid=1, partially_paid=0, unpaid=0))

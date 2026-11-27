@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.tenant import TenantScope
-from app.models import Appointment, AppointmentStatus, Payment
+from app.models import Appointment, AppointmentStatus, Payment, PaymentIntent
 from app.db.locking import lock_business
 from app.services.resources import resource_write
 
@@ -60,35 +60,51 @@ def payment_fingerprint(appointment_id, data):
     return sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def record_payment(session: Session, scope: TenantScope, appointment_id: UUID, data):
-    from app.schemas.payments import PaymentResponse
+def record_payment(session: Session, scope: TenantScope, appointment_id: UUID, data, user_id=None):
     with resource_write(session):
         lock_business(session, scope)
-        appointment = scope.get(session, Appointment, appointment_id)
-        fingerprint = payment_fingerprint(appointment_id, data)
-        previous = session.scalar(select(Payment).where(
-            Payment.business_id == scope.business_id, Payment.idempotency_key == data.idempotency_key,
-        ))
-        if previous is not None:
-            if previous.request_fingerprint != fingerprint:
-                raise HTTPException(409, 'Idempotency key was already used for a different payment')
-            result, created = PaymentResponse.model_validate(previous), False
-        else:
-            if appointment.status == AppointmentStatus.CANCELLED:
-                raise HTTPException(409, 'Cancelled appointments cannot receive payments')
-            if data.paid_at is not None and data.paid_at > datetime.now(timezone.utc):
-                raise HTTPException(422, 'Payment timestamp cannot be in the future')
-            summary = appointment_payment_summary(session, scope, appointment_id)
-            if data.amount > summary.balance_due:
-                raise HTTPException(409, 'Payment exceeds the outstanding balance')
-            values = data.model_dump(exclude={'paid_at'})
-            if data.paid_at is not None:
-                values['paid_at'] = data.paid_at
-            payment = Payment(business_id=scope.business_id, appointment_id=appointment_id,
-                              request_fingerprint=fingerprint, **values)
-            session.add(payment)
-            session.flush()
-            result, created = PaymentResponse.model_validate(payment), True
+        if session.scalar(select(PaymentIntent.id).where(
+            PaymentIntent.business_id == scope.business_id, PaymentIntent.id == data.idempotency_key,
+        )) is not None:
+            raise HTTPException(409, 'Use payment recovery to reconcile this request')
+        if user_id is not None and session.scalar(select(PaymentIntent.id).where(
+            PaymentIntent.business_id == scope.business_id, PaymentIntent.user_id == user_id,
+            PaymentIntent.appointment_id == appointment_id, PaymentIntent.resolved_at.is_(None),
+        )) is not None:
+            raise HTTPException(409, 'Reconcile the outstanding payment request first')
+        result = record_payment_locked(session, scope, appointment_id, data, user_id)
+    return result
+
+
+def record_payment_locked(session: Session, scope: TenantScope, appointment_id: UUID, data, user_id=None):
+    from app.schemas.payments import PaymentResponse
+    appointment = scope.get(session, Appointment, appointment_id)
+    fingerprint = payment_fingerprint(appointment_id, data)
+    previous = session.scalar(select(Payment).where(
+        Payment.business_id == scope.business_id, Payment.idempotency_key == data.idempotency_key,
+    ))
+    if previous is not None:
+        if user_id is not None and previous.recorded_by_id != user_id:
+            raise HTTPException(409, 'Payment request belongs to another user')
+        if previous.request_fingerprint != fingerprint:
+            raise HTTPException(409, 'Idempotency key was already used for a different payment')
+        result, created = PaymentResponse.model_validate(previous), False
+    else:
+        if appointment.status == AppointmentStatus.CANCELLED:
+            raise HTTPException(409, 'Cancelled appointments cannot receive payments')
+        if data.paid_at is not None and data.paid_at > datetime.now(timezone.utc):
+            raise HTTPException(422, 'Payment timestamp cannot be in the future')
+        summary = appointment_payment_summary(session, scope, appointment_id)
+        if data.amount > summary.balance_due:
+            raise HTTPException(409, 'Payment exceeds the outstanding balance')
+        values = data.model_dump(exclude={'paid_at'})
+        if data.paid_at is not None:
+            values['paid_at'] = data.paid_at
+        payment = Payment(business_id=scope.business_id, appointment_id=appointment_id,
+                          request_fingerprint=fingerprint, recorded_by_id=user_id, **values)
+        session.add(payment)
+        session.flush()
+        result, created = PaymentResponse.model_validate(payment), True
     return result, created
 
 

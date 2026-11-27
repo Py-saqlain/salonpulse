@@ -45,25 +45,39 @@ configured database, applied Alembic migrations and a private JWT signing secret
 
 ## Payments
 
-Owners and staff can record full/partial PKR payments, review balances and browse
-paginated receipt history. Methods: cash, bank transfer, JazzCash and Easypaisa.
+Owners and staff can record full/partial PKR payments and review appointment
+balances. Only owners can browse receipt history and financial analytics. Methods: cash, bank transfer, JazzCash and Easypaisa.
 Money is sent as decimal strings; the UI validates integer paisa. Cancelled
 appointments cannot receive new payments. API writes serialize with appointment
 changes to reject overpayments and preserve booked-price consistency.
 
 - `POST /api/appointments/{id}/payments`: record a receipt using a UUID v4
   idempotency key; identical retries return the original receipt.
-- `GET /api/appointments/{id}/payments`: paginated history and derived balances.
-- `GET /api/payments/{id}`: one authenticated, tenant-scoped receipt.
+- `GET /api/appointments/{id}/payment-summary`: necessary balances for owners/staff.
+- `GET /api/appointments/{id}/payments`: owner-only paginated history and balances.
+- `GET /api/payments/{id}`: one owner-only, tenant-scoped receipt.
+- `POST /api/appointments/{id}/payment-intents`: create a durable pending request.
+- `GET /api/appointments/{id}/payment-intents/active`: own unresolved intent.
+- `POST /api/appointments/{id}/payment-intents/{intent_id}/{action}`: reconcile,
+  confirm, cancel or acknowledge; all require the original authenticated actor.
 
-Pending retry keys live only in the current authenticated app instance. Duplicate
-clicks and uncertain requests reuse the same immutable payload/key across dialog
-closure, filters and navigation. Reload, logout, expiry, tab closure or a crash
-loses that local key. A new tab/login has a separate ledger. After losing a session,
-inspect history and reconcile any uncertain payment before recording again;
-creating a new key can create another legitimate partial receipt. Backend key
-uniqueness remains durable, but the frontend has no automatic cross-session
-recovery. Never use a new key merely to retry an unconfirmed payment.
+### Recovery after refresh or session loss
+
+Payment intents retain the immutable amount, method and reference on the server.
+Browser storage contains only a random intent UUID under a user/business/appointment
+UUID key; JWTs, amounts, methods and references are never persisted there. After
+refresh, log in again to the same account. Opening payments reconciles its unresolved
+intent before enabling a new submission, even if the browser pointer was cleared.
+Confirmed outcomes require explicit acknowledgment before another payment. Pending
+intents can be confirmed or cancelled; cancellation never reverses a recorded payment.
+Unknown requests are closed durably so a delayed submission cannot charge afterward.
+
+Web Locks serialize same-account tabs; unsupported browsers or unavailable/corrupt
+recovery storage block new payments safely. Server locking and uniqueness enforce
+retry safety across devices. Recovery is scoped to the recording user: another
+employee cannot reconcile their colleague's request. A deliberately new payment by
+another user is not automatically deduplicated by amount or reference. Server intents
+must be retained; deleting them would invalidate retry protection.
 
 ## Revenue reporting
 
@@ -77,8 +91,8 @@ all dates; they are not historical balances as of the reporting date.
 
 Cancelled appointments are excluded from outstanding balances and payment counts,
 but their existing receipts remain collected because refunds are not implemented.
-Free appointments count as paid. Both owners and staff currently have payment and
-analytics access; more granular financial roles are not implemented.
+Free appointments count as paid. Financial analytics and receipt history are owner-only.
+Staff see necessary appointment balances and their own pending payment details.
 
 ## Verification
 

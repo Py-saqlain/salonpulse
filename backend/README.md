@@ -476,14 +476,16 @@ use the existing `SALONPULSE_RUN_DB_TESTS=1` opt-in and always roll back fixture
 
 ### Authenticated payment API
 
-Owners and staff can use these endpoints with a Bearer access token:
+Owners and staff can record payments with a Bearer token. History and analytics
+require the owner role; staff are limited to balances and their own recovery requests:
 
 - `POST /api/appointments/{appointment_id}/payments`: record a receipt (201),
   or return the original receipt for an identical idempotent retry (200).
-- `GET /api/appointments/{appointment_id}/payments?limit=20&offset=0`: paginated
+- `GET /api/appointments/{appointment_id}/payment-summary`: owner/staff balances.
+- `GET /api/appointments/{appointment_id}/payments?limit=20&offset=0`: owner-only paginated
   history (`items`, `total`, `limit`, `offset`) plus `summary` containing decimal
   strings `booked_price`, `total_paid`, `balance_due` and derived `state`.
-- `GET /api/payments/{payment_id}`: retrieve one tenant-owned receipt.
+- `GET /api/payments/{payment_id}`: owner-only tenant-owned receipt.
 
 Example POST body (generate and retain a new random UUID v4 per intended receipt):
 
@@ -539,7 +541,7 @@ races using the same guarded local development database.
 
 ### Receipt-based revenue analytics
 
-`GET /api/analytics/revenue` is available to authenticated owners and staff in
+`GET /api/analytics/revenue` is available only to authenticated owners in
 only their own business. Optional `date=YYYY-MM-DD` selects a calendar reporting
 date; omission resolves today using the business timezone. Unknown query fields,
 including business_id, are rejected. There is no client-selected tenant context.
@@ -568,12 +570,35 @@ backend suite with the documented local database opt-in; fixture writes roll bac
 
 ### Financial audit limitations
 
-Frontend retry keys survive only the same authenticated app instance. The server
-retains tenant/key uniqueness, but the frontend cannot automatically recover a
-lost key after reload/logout/expiry/tab closure. Check and reconcile history
-before recording another payment after an uncertain request. A fresh key denotes
-a new receipt and is not deduplicated by amount/reference. Owners and staff both
-have payment and analytics access. Receipt timestamps do not constitute an
+Migration `894cc829413f` adds durable `payment_intents`, a nullable receipt actor
+for legacy compatibility, and composite tenant foreign keys. It does not rewrite
+previous receipts. Intent creation stores the frozen request server-side without
+recording a payment. Confirmation records the payment and marks its intent in the
+same transaction. Reconciliation, cancellation and acknowledgment share the
+business lock with payment and appointment writes. One unresolved intent per
+user/business/appointment is enforced by a partial unique index. Unknown nonce
+reconciliation creates a terminal tombstone, blocking delayed creation. Terminal
+outcomes must be explicitly acknowledged before another intent can be created.
+
+Under `/api/appointments/{appointment_id}/payment-intents`, POST creates a request
+using PaymentCreate; GET `/active` finds the actor's unresolved request; POST
+`/{intent_id}/reconcile`, `/confirm`, `/cancel`, `/acknowledge` returns state,
+resolved flag and balance. Only pending requests return their frozen payload;
+recorded results never return receipt history. All lookups require the authenticated
+user, business and appointment. Other users/tenants receive 404. Direct-API clients must retain their request key or adopt the intent protocol for
+recovery; the legacy direct receipt API binds new receipts to the actor, rejects another actor's replay and
+rejects keys reserved by recovery intents. Legacy actorless receipts remain
+owner-readable, but are not replayable by a public API actor.
+
+Browser storage holds only scoped UUID metadata; JWTs and payment payloads stay
+in memory or on the server. Web Locks coordinate tabs and storage failures fail
+closed. A new login to the same user recovers unresolved server intents even if
+local metadata was lost. Deliberately new submissions by different employees are
+not deduplicated by amount/reference. Do not delete intent records or tombstones.
+Owners alone can read financial analytics and history; staff can record payments,
+read necessary balances and reconcile their own intent.
+
+Receipt timestamps do not constitute an
 immutable operator audit trail. Provider reconciliation, refunds/corrections,
 production load testing, deployment hardening and backup/restore drills remain
 outside the current implementation. Direct SQL writers must honor application

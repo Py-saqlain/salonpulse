@@ -63,7 +63,7 @@ class PaymentModelTests(unittest.TestCase):
         scripts = ScriptDirectory.from_config(Config(str(backend / 'alembic.ini')))
         revision = scripts.get_revision('e11993c1b0a3')
         self.assertEqual(revision.down_revision, '4eaceb800869')
-        self.assertEqual(scripts.get_heads(), ["9b54ee7f2482"])
+        self.assertEqual(scripts.get_heads(), ["894cc829413f"])
         statements = []
         engine = create_mock_engine('postgresql+psycopg://', lambda sql, *a, **kw: statements.append(sql))
         with Operations.context(MigrationContext.configure(connection=engine, opts={"target_metadata": Base.metadata})):
@@ -73,8 +73,8 @@ class PaymentModelTests(unittest.TestCase):
         self.assertEqual(list(statements[0].element.columns.keys()), ['business_id', 'id'])
         table = next(sql.element for sql in statements if isinstance(sql, CreateTable))
         self.assertEqual(table.name, 'payments')
-        self.assertEqual(set(table.c.keys()), set(Payment.__table__.c.keys()) - {"idempotency_key", "request_fingerprint"})
-        self.assertEqual({str(c.name) for c in table.constraints}, {str(c.name) for c in Payment.__table__.constraints if str(c.name) not in {"uq_payments_business_idempotency", "ck_payments_idempotency_pair"}})
+        self.assertEqual(set(table.c.keys()), set(Payment.__table__.c.keys()) - {"idempotency_key", "request_fingerprint", "recorded_by_id"})
+        self.assertEqual({str(c.name) for c in table.constraints}, {str(c.name) for c in Payment.__table__.constraints if str(c.name) not in {"uq_payments_business_idempotency", "ck_payments_idempotency_pair", "uq_payments_business_id", "fk_payments_business_actor"}})
         self.assertEqual({sql.element.name for sql in statements if isinstance(sql, CreateIndex)},
                          {'ix_payments_business_appointment'})
         for sql in statements:

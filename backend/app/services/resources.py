@@ -25,6 +25,8 @@ def resource_write(session: Session, foreign_key_detail="Resource is referenced 
         state = getattr(error.orig, "sqlstate", None)
         constraint = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
         duplicates = {
+            "pk_payment_intents": "Payment request identifier is unavailable",
+            "uq_payment_intents_unresolved": "Reconcile the outstanding payment request first",
             "uq_payments_business_idempotency": "Idempotency key was already used for a payment",
             "uq_customers_business_phone": "Customer phone already exists in this business",
             "uq_staff_business_phone": "Staff phone already exists in this business",
