@@ -5,12 +5,14 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.schemas.errors import API_ERRORS
 from app.core.config import Settings, settings
+from app.core.http_security import SecurityMiddleware
 from app.db.session import Database, get_db
 from app.api.auth import router as auth_router
 from app.api.business import router as business_router
@@ -23,6 +25,7 @@ from app.api.analytics import router as analytics_router
 
 
 def create_app(config: Settings) -> FastAPI:
+    config = Settings.model_validate(config.model_dump())
     database = Database(config.database_url)
 
     @asynccontextmanager
@@ -32,7 +35,10 @@ def create_app(config: Settings) -> FastAPI:
         finally:
             database.dispose()
 
-    application = FastAPI(title=config.app_name, debug=config.debug, lifespan=lifespan)
+    application = FastAPI(title=config.app_name, debug=config.debug, lifespan=lifespan,
+                          docs_url="/docs" if config.docs_enabled else None,
+                          redoc_url="/redoc" if config.docs_enabled else None,
+                          openapi_url="/openapi.json" if config.docs_enabled else None)
     application.state.database = database
     application.state.settings = config
     application.include_router(auth_router, responses=API_ERRORS)
@@ -57,7 +63,10 @@ def create_app(config: Settings) -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["Retry-After"],
     )
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=config.trusted_hosts, www_redirect=False)
+    application.add_middleware(SecurityMiddleware, config=config)
 
     @application.get("/health")
     def health() -> dict[str, str]:

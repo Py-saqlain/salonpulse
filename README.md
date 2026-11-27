@@ -35,7 +35,7 @@ Backend terminal:
 ```powershell
 Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\backend'
 $env:DEBUG = 'false'
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --no-proxy-headers --no-access-log --no-server-header --host 127.0.0.1 --port 8000
 ```
 
 Open <http://127.0.0.1:5173>. Health checks are
@@ -86,7 +86,7 @@ analytics access; more granular financial roles are not implemented.
 Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\frontend'
 npm.cmd test
 npm.cmd run typecheck
-npm.cmd run build
+npm.cmd run build -- --mode development
 Set-Location '..\backend'
 $env:DEBUG = 'false'
 $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -111,3 +111,24 @@ still needed. Direct SQL writers must follow the same locking/validation protoco
 aggregate overpayment protection is enforced by application transactions rather
 than a database aggregate constraint. Session recovery, deployment hardening,
 monitoring and backup/restore verification remain production-readiness work.
+
+
+## Production security
+
+See [the deployment security contract](docs/production-security.md) before
+hosting. Production/staging require validated HTTPS CORS origins, exact API hosts,
+strong private JWT/database settings, PostgreSQL TLS hostname verification and
+HTTPS enforcement. Start hosted services with `python -m app.serve` behind the
+configured TLS proxy; the launcher disables Uvicorn proxy rewriting and access
+logs. Only explicitly trusted proxy CIDRs can supply client IP/scheme metadata.
+Authentication endpoints enforce bounded per-process limits and return HTTP 429
+with Retry-After. A shared ingress limiter is required for multiple replicas.
+
+Local development remains HTTP-compatible. The verification command above uses
+an explicitly development-mode bundle for local preview. For production, set the
+public `VITE_API_BASE_URL` to your actual HTTPS API hostname and run
+`npm.cmd run build`; missing/insecure values fail before bundling. API security
+headers do not configure the independently hosted static frontend. TLS, static
+CSP/headers, network restrictions, external log redaction and distributed abuse
+controls remain deployment responsibilities. No production infrastructure was
+created or verified by this local hardening task.

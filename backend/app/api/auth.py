@@ -12,7 +12,11 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserR
 from app.services.auth import DuplicateEmail, InvalidCredentials, authenticate_user, register_owner
 
 
-router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+router = APIRouter(prefix="/api/auth", tags=["Authentication"], responses={
+    429: {"description": "Authentication rate limit reached", "headers": {
+        "Retry-After": {"schema": {"type": "integer"}, "description": "Seconds until retry"}}},
+    413: {"description": "Authentication body exceeds the size limit"},
+})
 
 
 @router.get("/me", response_model=UserResponse)

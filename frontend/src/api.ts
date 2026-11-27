@@ -21,6 +21,20 @@ export function apiBaseUrl(value = 'http://127.0.0.1:8000'): string {
   return url.href.replace(/\/$/, '');
 }
 
+export function productionApiBaseUrl(value: string | undefined): string {
+  try {
+    if (!value) throw new Error();
+    const normalized = apiBaseUrl(value);
+    const url = new URL(normalized);
+    if (url.protocol !== 'https:' || !url.hostname.includes('.') || url.hostname.endsWith('.localhost')
+      || url.hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) || url.hostname.includes(':')) throw new Error();
+    return normalized;
+  } catch {
+    // A malformed value might itself contain credentials; never echo it.
+    throw new Error('Production builds require VITE_API_BASE_URL with an explicit HTTPS API hostname and no credentials, query or fragment.');
+  }
+}
+
 export class ApiClient {
   private readonly base: string;
   private readonly fetcher: typeof fetch;

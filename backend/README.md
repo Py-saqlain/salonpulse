@@ -8,11 +8,11 @@ virtual environment; no PostgreSQL tables are created by this application.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m pip check
 $env:DEBUG = 'false'
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --no-proxy-headers --no-access-log --no-server-header
 ```
 
 With the environment activated, the startup command is also
-`python -m uvicorn app.main:app --reload`. This machine previously inherited
+`python -m uvicorn app.main:app --reload --no-proxy-headers --no-access-log --no-server-header`. This machine previously inherited
 `DEBUG=release`; the explicit override above supplies a valid boolean.
 
 ## Private local configuration
@@ -578,3 +578,34 @@ immutable operator audit trail. Provider reconciliation, refunds/corrections,
 production load testing, deployment hardening and backup/restore drills remain
 outside the current implementation. Direct SQL writers must honor application
 locking and validation; there is no aggregate overpayment database constraint.
+
+
+## Production security
+
+[Deployment requirements and limitations](../docs/production-security.md) describe
+validated production/staging settings, trusted proxy chains, HTTPS, security
+headers and logging boundaries. The public `.env.production.example` template
+contains no signing key or database password; never overwrite the local `.env`.
+
+Use `python -m app.serve --host 127.0.0.1 --port 8000` behind the trusted TLS edge.
+The launcher disables server-level forwarded-header interpretation and request
+access logging, removes the server version header, and runs one process. Only
+configured proxy CIDRs influence client IP/scheme; other forwarding metadata is
+ignored and stripped before routing. Public HTTP is rejected, and HSTS is emitted
+only on verified production HTTPS. Production docs/OpenAPI default to disabled.
+
+Login/register limits default to 10/minute and 5/hour in production (120/minute
+and 60/hour locally). Limits include invalid POST bodies, are thread-safe and
+memory-bounded, and return 429/Retry-After without revealing account identity.
+Auth bodies over 16 KiB return 413. Limits reset on restart and are per-process;
+shared edge enforcement and Argon2-aware request/concurrency budgets are required
+for distributed deployments. JWT issuer/audience are mandatory in production;
+Argon2id, live user status, role checks, tenant filters and financial locks remain
+in place. No schema migration is needed.
+
+Application exceptions return redacted errors and fixed log markers. Independent
+proxy/hosting/tracing logs still need explicit redaction and access control. The
+security regression suite verifies proxy spoofing, IP normalization, concurrent
+limits, capacity/expiry, HTTPS/hosts/CORS/headers, token claims, body limits and
+startup/exception redaction. Run all tests with the existing DB opt-in, and keep
+credentials private throughout verification.

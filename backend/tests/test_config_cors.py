@@ -17,9 +17,10 @@ with patch.dict(os.environ, {}, clear=True):
     from app.main import create_app
 
 
-async def request(app, method="GET", origin=None, extra_headers=(), path="/health", body=b"", query_string=b""):
+async def request(app, method="GET", origin=None, extra_headers=(), path="/health", body=b"", query_string=b"",
+                  host="testserver", scheme="http", client=None):
     """Exercise the ASGI middleware stack without additional HTTP test packages."""
-    headers = [(b"host", b"testserver")]
+    headers = [(b"host", host.encode())]
     if origin:
         headers.append((b"origin", origin.encode()))
     headers.extend((name.lower().encode(), value.encode()) for name, value in extra_headers)
@@ -33,9 +34,9 @@ async def request(app, method="GET", origin=None, extra_headers=(), path="/healt
 
     await app({
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-        "method": method, "scheme": "http", "path": path, "raw_path": path.encode(),
+        "method": method, "scheme": scheme, "path": path, "raw_path": path.encode(),
         "query_string": query_string, "root_path": "", "headers": headers,
-        "client": ("127.0.0.1", 1234), "server": ("testserver", 80),
+        "client": client or ("127.0.0.1", 8765), "server": ("testserver", 80),
     }, receive, send)
     start = next(message for message in messages if message["type"] == "http.response.start")
     body = b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body")

@@ -19,6 +19,14 @@ test('API base URL is configurable and rejects credentials or unsafe protocols',
   for (const value of ['javascript:alert(1)', 'https://user:private@example.com', 'http://example.com?key=private', 'bad-url']) assert.throws(() => api.apiBaseUrl(value));
 });
 
+test('production builds require a credential-free HTTPS API hostname and redact invalid values', () => {
+  assert.equal(api.productionApiBaseUrl('https://api.salon.example/'), 'https://api.salon.example');
+  for (const value of [undefined, '', 'http://api.salon.example', 'https://localhost', 'https://api.localhost',
+                       'https://127.0.0.1', 'https://[::1]', 'https://user:private-value@api.salon.example', 'https://api.salon.example?private-value=1']) {
+    assert.throws(() => api.productionApiBaseUrl(value), error => !error.message.includes('private-value') && error.message.includes('HTTPS API hostname'));
+  }
+});
+
 test('native fetch keeps the browser global receiver rather than the API client', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async function () {

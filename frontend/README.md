@@ -11,7 +11,7 @@ Start the configured backend in a separate terminal:
 ```powershell
 Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\backend'
 $env:DEBUG = 'false' # process-only override for an inherited DEBUG=release
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --no-proxy-headers --no-access-log --no-server-header
 ```
 
 Then start the frontend (existing dependencies require no additional packages):
@@ -131,7 +131,7 @@ server appointments persist across refresh/logout.
 ```powershell
 npm.cmd test
 npm.cmd run typecheck
-npm.cmd run build
+npm.cmd run build -- --mode development
 ```
 
 Tests use Node 24's built-in test runner/type stripping; no new test dependencies
@@ -235,3 +235,28 @@ confirms one receipt after the same request is retried following navigation.
 Owners and staff currently have the same payment and revenue-read permissions.
 Granular finance permissions, immutable operator attribution, settlement checks,
 refund/correction flows and production load testing are not included.
+
+
+## Production build and security
+
+The build guard requires `VITE_API_BASE_URL` to name an explicit HTTPS API host
+without credentials, query or fragment. It applies to production, staging and
+other custom build modes. Configure the real public deployment origin before:
+
+```powershell
+$env:VITE_API_BASE_URL = 'https://api.salon.example' # replace for deployment
+npm.cmd run build
+```
+
+The local verification example uses `--mode development` intentionally; do not
+ship that preview bundle as production. Vite's environment lookup is relative to
+its project directory and does not depend on Node globals in the frontend type
+configuration. The explicit .ts config import works with Vite's native-loader
+migration and TypeScript's no-emit setting.
+
+Rate-limited authentication returns safe HTTP 429 messages and Retry-After; the
+client preserves that error instead of exposing submitted values. Production
+backend CORS grants only configured HTTPS origins and never browser credentials.
+The static frontend host must apply its own TLS, CSP, frame, referrer and cache
+policies: see [deployment security](../docs/production-security.md). Vite preview
+is not a production security-header or TLS server.

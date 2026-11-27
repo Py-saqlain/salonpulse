@@ -52,18 +52,30 @@ def dummy_password_hash() -> str:
 
 def create_access_token(user_id: UUID, config: Settings) -> str:
     now = datetime.now(timezone.utc)
-    return jwt.encode({"sub": str(user_id), "iat": now,
-                       "exp": now + timedelta(minutes=config.access_token_expire_minutes)},
-                      signing_key(config), algorithm=JWT_ALGORITHM)
+    claims = {"sub": str(user_id), "iat": now, "exp": now + timedelta(minutes=config.access_token_expire_minutes)}
+    if config.jwt_issuer:
+        claims["iss"] = config.jwt_issuer
+    if config.jwt_audience:
+        claims["aud"] = config.jwt_audience
+    return jwt.encode(claims, signing_key(config), algorithm=JWT_ALGORITHM)
 
 
 def decode_access_token(token: str, config: Settings) -> UUID:
     key = signing_key(config)
     try:
+        if not isinstance(token, str) or len(token) > 8192:
+            raise ValueError
+        required = ["sub", "iat", "exp"]
+        if config.jwt_issuer:
+            required.append("iss")
+        if config.jwt_audience:
+            required.append("aud")
         claims = jwt.decode(token, key, algorithms=[JWT_ALGORITHM],
-                            options={"require": ["sub", "iat", "exp"]})
+                            issuer=config.jwt_issuer, audience=config.jwt_audience,
+                            options={"require": required})
         if (type(claims["iat"]) is not int or type(claims["exp"]) is not int
-                or claims["exp"] <= claims["iat"]):
+                or claims["exp"] <= claims["iat"]
+                or claims["exp"] - claims["iat"] > config.access_token_expire_minutes * 60):
             raise ValueError
         subject = UUID(claims["sub"])
         if str(subject) != claims["sub"]:
