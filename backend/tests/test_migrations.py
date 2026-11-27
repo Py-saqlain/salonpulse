@@ -104,12 +104,14 @@ class MigrationTests(unittest.TestCase):
 
 
 class MigrationEnvironmentTests(unittest.TestCase):
-    def run_environment(self, url="postgresql+psycopg://localhost/salonpulse_test"):
+    def run_environment(self, url="postgresql+psycopg://localhost/salonpulse_test", supplied=None):
         # Patch the settings singleton: never inspect private .env values.
         from app.core.config import Settings
         settings = Settings(_env_file=None, database_url=url, debug=False)
         config = Config(str(BACKEND / "alembic.ini"))
         config.attributes["read_only"] = True
+        if supplied is not None:
+            config.attributes["connection"] = supplied
         engine = MagicMock()
         with (
             patch("app.core.config.settings", settings),
@@ -135,6 +137,14 @@ class MigrationEnvironmentTests(unittest.TestCase):
         self.assertTrue(create.call_args.kwargs["hide_parameters"])
         self.assertFalse(create.call_args.kwargs["echo"])
         engine.dispose.assert_called_once()
+
+    def test_supplied_connection_remains_read_only_and_owned_by_caller(self):
+        supplied=MagicMock()
+        _,engine,create,configure=self.run_environment(supplied=supplied)
+        create.assert_not_called();engine.dispose.assert_not_called()
+        supplied.exec_driver_sql.assert_called_once_with('SET TRANSACTION READ ONLY')
+        self.assertIs(configure.call_args.kwargs['connection'],supplied)
+        self.assertTrue(configure.call_args.kwargs['dont_mutate'])
 
     def test_missing_or_wrong_driver_url_fails_safely(self):
         for url in [None, "sqlite:///test.db", "invalid URL"]:

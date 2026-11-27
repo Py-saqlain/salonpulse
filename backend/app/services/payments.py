@@ -16,6 +16,7 @@ from app.db.tenant import TenantScope
 from app.models import Appointment, AppointmentStatus, Payment, PaymentIntent
 from app.db.locking import lock_business
 from app.services.resources import resource_write
+from app.services.audit import append_audit
 
 
 class PaymentState(str, Enum):
@@ -78,6 +79,7 @@ def record_payment(session: Session, scope: TenantScope, appointment_id: UUID, d
 
 def record_payment_locked(session: Session, scope: TenantScope, appointment_id: UUID, data, user_id=None):
     from app.schemas.payments import PaymentResponse
+    user_id = user_id or scope.operator_id
     appointment = scope.get(session, Appointment, appointment_id)
     fingerprint = payment_fingerprint(appointment_id, data)
     previous = session.scalar(select(Payment).where(
@@ -104,6 +106,7 @@ def record_payment_locked(session: Session, scope: TenantScope, appointment_id: 
                           request_fingerprint=fingerprint, recorded_by_id=user_id, **values)
         session.add(payment)
         session.flush()
+        append_audit(session, scope, "payment.recorded", payment.id, user_id)
         result, created = PaymentResponse.model_validate(payment), True
     return result, created
 

@@ -7,10 +7,10 @@ export async function verifyAnalytics({ accounts, command, evaluate, wait, route
   const tokens = [], fixtures = [];
   async function api(index, path, method = 'GET', body) {
     if (!tokens[index]) {
-      const result = await fetch('http://127.0.0.1:8000/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
+      const result = await fetch('http://127.0.0.1:8010/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
       check(result.status === 200, 'Analytics fixture login'); tokens[index] = (await result.json()).access_token;
     }
-    const result = await fetch('http://127.0.0.1:8000/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const result = await fetch('http://127.0.0.1:8010/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: result.status, data: result.status === 204 ? null : await result.json() };
   }
   async function post(index, path, body) { const result = await api(index, path, 'POST', body); check(result.status === 201, 'Analytics fixture ' + path); return result.data; }
@@ -21,14 +21,16 @@ export async function verifyAnalytics({ accounts, command, evaluate, wait, route
   function timezoneFixture(index) {
     const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
     const code = `
-import json,sys
+import json,sys,os
 from sqlalchemy import create_engine,select,update
 from sqlalchemy.engine import make_url
 from app.core.config import Settings
 from app.models import Business,User
 d=json.loads(sys.argv[1]);u=make_url(Settings().database_url.get_secret_value())
 assert u.database=='salonpulse_dev' and u.username=='salonpulse_app' and u.host in ('localhost','127.0.0.1','::1') and u.port==5432
-e=create_engine(u,hide_parameters=True)
+sys.path.insert(0,'tests')
+from isolated_db import test_engine
+e=test_engine(os.environ['SALONPULSE_TEST_SCHEMA'])
 try:
  with e.begin() as c:
   b=c.scalar(select(Business.id).where(Business.name==d['business_name']));assert b and d['business_name'].startswith('__day7_browser__')

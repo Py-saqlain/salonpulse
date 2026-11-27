@@ -23,6 +23,7 @@ TENANT_MODELS = (Customer, Staff, Service, Appointment)
 @dataclass(frozen=True)
 class TenantScope:
     business_id: UUID
+    operator_id: UUID | None = None
 
     def select(self, model: type[Resource]) -> Select[tuple[Resource]]:
         self._check_model(model)

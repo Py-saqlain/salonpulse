@@ -12,6 +12,7 @@ from app.db.tenant import TenantScope
 from app.db.locking import lock_business
 from app.models import Appointment, AppointmentStatus, Staff, Service
 from app.services.working_hours import ensure_working_hours
+from app.services.audit import append_audit
 
 
 @contextmanager
@@ -61,6 +62,8 @@ def create_resource(session: Session, scope: TenantScope, model, data, response_
         resource = model(business_id=scope.business_id, **data.model_dump())
         session.add(resource)
         session.flush()
+        if model is Service:
+            append_audit(session, scope, "service.created", resource.id)
         response = response_schema.model_validate(resource)
     return response
 
@@ -86,7 +89,11 @@ def patch_resource(session: Session, scope: TenantScope, model, resource_id, dat
                         ensure_working_hours(values["hours"], booking.starts_at, booking.ends_at, business.timezone)
                     except HTTPException:
                         raise HTTPException(409, "Working-hours change conflicts with active appointments; reschedule or cancel them first") from None
+        before = scope.get(session, model, resource_id)
+        changed = any(getattr(before,key) != value for key,value in values.items())
         resource = scope.update(session, model, resource_id, values)
+        if model is Service and changed:
+            append_audit(session, scope, "service.updated", resource.id)
         response = response_schema.model_validate(resource)
     return response
 
@@ -96,3 +103,5 @@ def delete_resource(session: Session, scope: TenantScope, model, resource_id):
         if model in (Staff, Service):
             lock_business(session, scope)
         scope.delete(session, model, resource_id)
+        if model is Service:
+            append_audit(session, scope, "service.deleted", resource_id)

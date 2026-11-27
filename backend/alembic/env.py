@@ -13,7 +13,7 @@ from app.db.base import Base
 import app.models  # noqa: F401 -- register all ORM tables before autogeneration
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and not config.attributes.get("skip_logging_configuration", False):
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
@@ -56,6 +56,15 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
+    supplied = config.attributes.get('connection')
+    if supplied is not None:
+        read_only = read_only_command()
+        if read_only:
+            supplied.exec_driver_sql("SET TRANSACTION READ ONLY")
+        context.configure(connection=supplied, dont_mutate=read_only, **comparison_options)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
     engine = create_engine(
         database_url(), poolclass=pool.NullPool, echo=False, hide_parameters=True,
         connect_args={"connect_timeout": 5},

@@ -11,10 +11,10 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   const tokens = [];
   async function api(index, path, method = 'GET', body) {
     if (!tokens[index]) {
-      const result = await fetch('http://127.0.0.1:8000/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
+      const result = await fetch('http://127.0.0.1:8010/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
       check(result.status === 200, 'Fixture login'); tokens[index] = (await result.json()).access_token;
     }
-    const result = await fetch('http://127.0.0.1:8000/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const result = await fetch('http://127.0.0.1:8010/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: result.status, data: result.status === 204 ? null : await result.json() };
   }
   async function post(index, resource, body) { const result = await api(index, resource, 'POST', body); check(result.status === 201, resource + ' fixture creation'); return result.data; }
@@ -66,7 +66,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
     const run = async expression => { const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw new Error('Secondary browser evaluation failed'); return result.result.value; };
     const shutdown = async () => { connection.close(); for (const request of requests.values()) clearTimeout(request.timer); await fetch(cdpOrigin + '/json/close/' + page.id); };
     try {
-      await send('Runtime.enable'); await send('Page.enable'); await send('Page.navigate', { url: 'http://127.0.0.1:5173/#login' });
+      await send('Runtime.enable'); await send('Page.enable'); await send('Page.navigate', { url: 'http://127.0.0.1:5174/#login' });
       await until(run, '!!document.querySelector(".auth-form")', 'secondary login');
       await set('input[name=email]', accounts[0].email, run); await set('input[name=password]', accounts[0].password, run);
       await run('document.querySelector(".auth-form").requestSubmit()'); await ready(run);
@@ -158,7 +158,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   // marked temporary identity to verify the existing database-derived role.
   const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
   const roleCode = `
-import json,sys
+import json,sys,os
 from sqlalchemy import create_engine,select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -166,7 +166,9 @@ from app.core.config import Settings
 from app.models import User,Business,UserRole
 d=json.loads(sys.argv[1]);u=make_url(Settings().database_url.get_secret_value())
 assert u.host in ('localhost','127.0.0.1','::1') and u.database=='salonpulse_dev' and u.username=='salonpulse_app' and u.port==5432
-e=create_engine(u,hide_parameters=True)
+sys.path.insert(0,'tests')
+from isolated_db import test_engine
+e=test_engine(os.environ['SALONPULSE_TEST_SCHEMA'])
 try:
  with Session(e) as s,s.begin():
   b=s.scalar(select(Business).where(Business.name==d['business_name']));assert b is not None and b.name.startswith('__day7_browser__')

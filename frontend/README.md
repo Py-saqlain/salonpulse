@@ -139,11 +139,11 @@ are needed. Production output is `dist/` (ignored by Git).
 
 
 `tests/browser-auth.mjs` is an opt-in real Chrome check (not part of `npm test`).
-It requires the frontend on 127.0.0.1:5173, backend on 127.0.0.1:8000, and a
-separate temporary Chrome profile exposing CDP on localhost:9223. Run
+It requires the dedicated test frontend on 127.0.0.1:5174 and a temporary
+Chrome profile exposing CDP; the harness owns its isolated backend on port 8010. Run
 `node tests/browser-auth.mjs` from `frontend`. It uses the existing backend venv
 for guarded database checks and cleanup, accepts only local `salonpulse_dev` as
-`salonpulse_app`, and removes only its uniquely marked temporary businesses/users.
+`salonpulse_app`, and removes only its own disposable schema after checking public row IDs.
 Passwords are generated in memory and never logged. It verifies live auth forms,
 422 errors, loading, duplicate registration, account isolation, expiry, refresh,
 network errors, a simulated protected 401, mobile navigation and overflow.
@@ -153,14 +153,14 @@ CRUD verification. It creates two uniquely marked businesses, tests real forms,
 HTTP tenant isolation, staff permissions, price bounds, persistence, pagination,
 network failure and deactivation/deletion constraints. Its guarded fixture helper
 changes only its temporary user role and creates one temporary appointment to
-exercise reference restrictions; it always cleans up those businesses and restores
-the database record-ID baseline. It does not implement frontend appointment APIs.
+exercise reference restrictions; it always removes its disposable schema and
+verifies the public database record-ID baseline.
 
 Run `node tests/browser-auth.mjs --appointments` for the appointment browser
 suite. It races two authenticated Chrome tabs against the same staff slot,
 verifies booking/edit/cancellation/status flows, snapshots, history, walk-ins,
 permissions, tenant isolation, persistence and network errors. The shared harness
-always removes only its uniquely marked test businesses and restores the database
+always removes its owned disposable schema and checks the public database
 baseline. `--crud` additionally covers failed refresh followed by successful retry,
 request coalescing, and preservation of cached records, draft inputs and feedback.
 
@@ -189,11 +189,10 @@ Obsolete demo-storage migration behavior is no longer part of the application.
 Day 8 adds appointment payment balances, entry and paginated receipt history.
 Cash, bank transfer, JazzCash and Easypaisa use the authenticated backend API.
 Amounts are validated as integer paisa before decimal strings are sent. A
-session-owned ledger coalesces duplicate clicks and retains the immutable UUID
-request key across dialog closure and navigation after uncertain results. Retry
-uses that same request; a confirmed receipt requires an explicit Record another
-payment action before a new key is issued. Keys are not persisted across refresh
-or logout: after losing a session, inspect history before recording again.
+scoped ledger coalesces duplicate clicks and persists only recovery UUID metadata.
+The server retains frozen requests across refresh or logout. Reconciliation must
+finish before another payment can be recorded; a confirmed receipt requires an
+explicit Record another payment action before a new key is issued.
 
 The dashboard and Analytics page use `/api/analytics/revenue`, never completed
 booking prices, for collected revenue. Calendar days, Monday-start weeks and
@@ -214,28 +213,67 @@ Chrome verification. Payment tests deliberately drop a committed response, retry
 after navigation, verify no duplicate receipt, and test both businesses and staff
 access. Analytics tests cover timezone boundaries, collection accuracy, payment
 refresh, persistence, network failure and mobile layout. The harness now verifies
-all seven application tables and cleans payments before appointments.
+all nine public application tables and removes disposable schemas without
+disabling audit protection.
 
-The unit suite currently contains 81 tests, including payment, revenue and browser
+The unit suite currently contains 98 tests, including payment, revenue and browser
 readiness regressions. Readiness predicates are converted to booleans before CDP
 serialization; selectors use normal JavaScript quoting, and inherited disabled
 state is checked with `:disabled` rather than the input's own disabled property.
 
 
-### Payment audit: session boundary
+### Persistent payment recovery and financial roles
 
-The supported retry session is one authenticated app instance. The ledger is
-replaced at logout/expiry/new login and never shared with another tab. Reload,
-tab closure or a browser crash loses the pending local request key. Backend
-idempotency records remain durable, but automatic cross-session recovery is not
-implemented. Reconcile receipt history after losing an uncertain request; sending
-a fresh key can record another partial receipt. The lost-response browser test
-confirms one receipt after the same request is retried following navigation.
+The ledger persists only scoped user/business/appointment UUIDs and an intent UUID.
+No JWT, amount, method, reference or customer data is saved in browser storage.
+The server retains frozen pending details. Refresh/session loss requires login,
+then payment recovery reconciles the prior request before enabling another.
+Unresolved server intents are discoverable even without a local pointer. Web Locks
+serialize tabs; unavailable/corrupt storage or missing Web Locks blocks new payments.
+Only the recording user may resume their pending request. A deliberately new
+payment by another employee is not deduplicated by amount/reference.
 
-Owners and staff currently have the same payment and revenue-read permissions.
-Granular finance permissions, immutable operator attribution, settlement checks,
-refund/correction flows and production load testing are not included.
+Only owners see receipt history, revenue analytics and Audit & reconciliation.
+Staff can record payments and read appointment balances; backend authorization
+remains authoritative. The audit page lists fixed actions, operator/resource UUIDs
+and business-local timestamps, with server pagination/action filtering. Its ledger
+report uses exact decimal strings, shows stale/error/loading states and reports
+inconsistencies without modifying financial records.
 
+### Isolated browser verification
+
+The browser harness now creates and migrates a marked disposable PostgreSQL schema
+and starts its own API on 127.0.0.1:8010. It shuts that server down through its
+private stdin pipe, drops only the owned test schema, and checks that all nine
+public tables are unchanged. It never disables append-only audit protection.
+Do not run browser scripts against the normal development API.
+
+Start a dedicated test frontend in a separate terminal (normal frontend/backend
+ports 5173/8000 can keep running):
+
+```powershell
+Set-Location 'D:\PROJECTS\Portfolio Projects\salonpulse\frontend'
+$env:VITE_API_BASE_URL = 'http://127.0.0.1:8010'
+npm.cmd run dev -- --host 127.0.0.1 --port 5174 --strictPort
+```
+
+Use an isolated Chrome profile with CDP enabled, then run from frontend:
+
+```powershell
+$env:SALONPULSE_CDP_URL = 'http://127.0.0.1:9226'
+node tests/browser-auth.mjs
+node tests/browser-auth.mjs --crud
+node tests/browser-auth.mjs --appointments
+node tests/browser-auth.mjs --dashboard
+node tests/browser-auth.mjs --analytics
+node tests/browser-auth.mjs --payments
+node tests/browser-auth.mjs --audit
+```
+
+All test passwords and tokens stay in memory. Migration logs contain no connection
+URLs. The harness requires the existing configured local PostgreSQL role to own
+new disposable schemas, and refuses unexpected database targets or test-schema
+ownership. Financial checks do not reconcile actual bank/provider settlements.
 
 ## Production build and security
 

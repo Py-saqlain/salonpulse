@@ -263,28 +263,21 @@ class AppointmentDatabaseTests(AppointmentFixture):
 @unittest.skipUnless(os.environ.get("SALONPULSE_RUN_DB_TESTS") == "1", "local PostgreSQL tests require explicit opt-in")
 class AppointmentConcurrencyFixture(LocalPostgresTestCase):
     def seed_committed_fixture(self):
-        # Separate connections need visible fixtures. Only these uniquely identified
-        # records are committed, then targeted cleanup runs even after assertion failure.
-        business_id, customer_id, staff_id, service_id = (uuid4() for _ in range(4))
+        # Committed races run outside public; cleanup drops only this marked disposable schema.
+        from isolated_db import DisposableSchema
+        isolated=DisposableSchema();self.addCleanup(isolated.close);self.engine=isolated.engine
+        business_id, customer_id, staff_id, service_id, operator_id = (uuid4() for _ in range(5))
         name = "__appointment_concurrency__" + uuid4().hex
-
-        def cleanup():
-            with self.engine.begin() as connection:
-                assert connection.scalar(select(Business.name).where(Business.id == business_id)) in (None, name)
-                connection.execute(delete(Appointment).where(Appointment.business_id == business_id))
-                for model, record_id in ((Customer, customer_id), (Staff, staff_id), (Service, service_id)):
-                    connection.execute(delete(model).where(model.id == record_id, model.business_id == business_id))
-                connection.execute(delete(Business).where(Business.id == business_id, Business.name == name))
-        self.addCleanup(cleanup)
         with Session(self.engine, expire_on_commit=False) as session, session.begin():
             session.add(Business(id=business_id, name=name))
             session.flush()
-            session.add_all([Customer(id=customer_id, business_id=business_id, name="Concurrency customer"),
+            session.add_all([User(id=operator_id,business_id=business_id,full_name="Concurrency operator",email="race-"+uuid4().hex+"@example.com",password_hash="!unusable"),
+                             Customer(id=customer_id, business_id=business_id, name="Concurrency customer"),
                              Staff(id=staff_id, business_id=business_id, name="Concurrency staff", hours=ALL_HOURS),
                              Service(id=service_id, business_id=business_id, name="Concurrency service", duration_minutes=30, price=Decimal("1000.00"))])
         payload = AppointmentCreate(customer_id=customer_id, staff_id=staff_id, service_id=service_id,
                                     starts_at=(datetime.now(timezone.utc) + timedelta(days=3)).replace(hour=5, minute=0, second=0, microsecond=0))
-        return TenantScope(business_id), payload
+        return TenantScope(business_id,operator_id), payload
 
 
 class AppointmentConcurrencyTests(AppointmentConcurrencyFixture):

@@ -180,12 +180,6 @@ class RecoveryConcurrencyTests(AppointmentConcurrencyFixture):
         with self.engine.begin() as connection:
             connection.execute(User.__table__.insert().values(id=actor,business_id=scope.business_id,
                 full_name='Recovery fixture',email='recovery-'+uuid4().hex+'@example.com',password_hash='!unusable'))
-        def cleanup():
-            with self.engine.begin() as connection:
-                connection.execute(delete(PaymentIntent).where(PaymentIntent.business_id==scope.business_id))
-                connection.execute(delete(Payment).where(Payment.business_id==scope.business_id))
-                connection.execute(delete(User).where(User.business_id==scope.business_id,User.id==actor))
-        self.addCleanup(cleanup)
         return scope,booking,actor
     remove_receipts=payment_tests.PaymentConcurrencyTests.remove_receipts
 

@@ -5,4 +5,6 @@ from app.models.entities import (
     Payment, PaymentMethod, PaymentIntent, PaymentIntentState,
 )
 
-__all__ = ["Business", "Customer", "Staff", "Service", "Appointment", "AppointmentStatus", "AppointmentType", "User", "UserRole", "Payment", "PaymentMethod", "PaymentIntent", "PaymentIntentState"]
+__all__ = ["Business", "Customer", "Staff", "Service", "Appointment", "AppointmentStatus", "AppointmentType", "User", "UserRole", "Payment", "PaymentMethod", "PaymentIntent", "PaymentIntentState", "AuditLog", "AuditAction"]
+
+from app.models.audit import AuditLog, AuditAction

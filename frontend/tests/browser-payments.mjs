@@ -8,10 +8,10 @@ export async function verifyPayments({ accounts, command, evaluate, wait, route,
   const tokens = [];
   async function api(index, path, method = 'GET', body) {
     if (!tokens[index]) {
-      const result = await fetch('http://127.0.0.1:8000/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
+      const result = await fetch('http://127.0.0.1:8010/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
       check(result.status === 200, 'Payment fixture login'); tokens[index] = (await result.json()).access_token;
     }
-    const result = await fetch('http://127.0.0.1:8000/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const result = await fetch('http://127.0.0.1:8010/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: result.status, data: result.status === 204 ? null : await result.json() };
   }
   async function post(index, resource, body) { const result = await api(index, resource, 'POST', body); check(result.status === 201, resource + ' payment fixture'); return result.data; }
@@ -58,14 +58,16 @@ export async function verifyPayments({ accounts, command, evaluate, wait, route,
   function promoteToStaff() {
     const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
     const code = `
-import json,sys
+import json,sys,os
 from sqlalchemy import create_engine,select,update
 from sqlalchemy.engine import make_url
 from app.core.config import Settings
 from app.models import Business,User
 d=json.loads(sys.argv[1]);u=make_url(Settings().database_url.get_secret_value())
 assert u.database=='salonpulse_dev' and u.username=='salonpulse_app' and u.host in ('localhost','127.0.0.1','::1') and u.port==5432
-e=create_engine(u,hide_parameters=True)
+sys.path.insert(0,'tests')
+from isolated_db import test_engine
+e=test_engine(os.environ['SALONPULSE_TEST_SCHEMA'])
 try:
  with e.begin() as c:
   business=c.scalar(select(Business.id).where(Business.name==d['business_name']));assert business is not None and d['business_name'].startswith('__day7_browser__')
@@ -100,7 +102,7 @@ finally:e.dispose()
       dropped = true; await command('Fetch.failRequest', { requestId: params.requestId, errorReason: 'ConnectionClosed' });
     } else await command('Fetch.continueRequest', { requestId: params.requestId });
   });
-  await command('Fetch.enable', { patterns: [{ urlPattern: '*8000/api/appointments/*/payment-intents/*/confirm', requestStage: 'Response' }] });
+  await command('Fetch.enable', { patterns: [{ urlPattern: '*8010/api/appointments/*/payment-intents/*/confirm', requestStage: 'Response' }] });
   await evaluate('document.querySelector(".payment-form").requestSubmit();document.querySelector(".payment-form").requestSubmit()');
   await wait('document.querySelector("[data-payment-dialog]").textContent.includes("Payment recorded.") && !document.querySelector("[data-payment-dialog]").textContent.includes("Loading payments...")', 'automatic lost-response reconciliation');
   await command('Fetch.disable'); setInterceptor(null);
@@ -111,7 +113,7 @@ finally:e.dispose()
   const pointer = await evaluate(`localStorage.getItem(${JSON.stringify(recoveryKey)})`);
   check(Object.keys(JSON.parse(pointer)).join(',') === 'intent_id', 'Sensitive payment data persisted');
   // A fresh document loses the in-memory JWT and ledger. Login must reconcile the prior receipt.
-  await close(); await command('Page.navigate', { url: 'http://127.0.0.1:5173/?recovery=' + randomUUID() + '#appointments' });
+  await close(); await command('Page.navigate', { url: 'http://127.0.0.1:5174/?recovery=' + randomUUID() + '#appointments' });
   await wait('!!document.querySelector(".auth-form")','refresh requires reauthentication');
   await login(accounts[0]); await open(bookings[0].id, false);
   await wait('document.querySelector("[data-payment-dialog]").textContent.includes("Payment recorded.")','persistent payment recovery');

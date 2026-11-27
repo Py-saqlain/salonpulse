@@ -598,12 +598,64 @@ not deduplicated by amount/reference. Do not delete intent records or tombstones
 Owners alone can read financial analytics and history; staff can record payments,
 read necessary balances and reconcile their own intent.
 
-Receipt timestamps do not constitute an
-immutable operator audit trail. Provider reconciliation, refunds/corrections,
+Immutable metadata now attributes financial writes to operators; see the audit
+contract below. Provider settlement reconciliation, refunds/corrections,
 production load testing, deployment hardening and backup/restore drills remain
 outside the current implementation. Direct SQL writers must honor application
 locking and validation; there is no aggregate overpayment database constraint.
 
+
+## Immutable audit history and ledger reconciliation
+
+Revision `1deb66be8c11` adds `audit_logs` and the `audit_logs_immutable` PostgreSQL
+statement trigger. UPDATE, DELETE and TRUNCATE raise SQLSTATE 55000, including
+empty-table attempts. A composite business/operator foreign key prevents
+cross-tenant attribution and restricts removal of referenced users/businesses.
+A partial unique index permits only one `payment.recorded` event per receipt.
+Polymorphic resource UUIDs survive normal service deletion; no personal or payment
+payload is copied into audit history. There is no mutable `updated_at` column.
+
+The authenticated server-created TenantScope carries the live operator UUID.
+Audited services require an operator and flush audit rows within resource_write;
+there is no independent audit commit. Coverage: payment recording (direct and
+intent confirmation), appointment creation/edit/status/cancellation/repricing,
+service create/update/delete, intent creation and pending cancellation. Replays
+and repeat cancellation do not create duplicate payment/cancellation events.
+Authentication attempts and personal-directory field changes are not logged by
+this financial audit module. SQL clients bypassing these services must provide
+correct audit entries in their transaction and follow the business lock protocol.
+
+- GET `/api/audit-logs`: owner-only `items`, `total`, `limit`, `offset`.
+  Query `limit` 1-100 (default 20), nonnegative `offset`, optional enum `action`
+  and UUID `resource_id`; unknown fields are rejected. Safe event fields are
+  `id`, `business_id`, `operator_id`, `action`, `resource_id`, `created_at`.
+- GET `/api/finance/reconciliation`: owner-only, no query fields. Response contains
+  tenant/timezone, currency PKR, `as_of`, Decimal strings `collected_total`,
+  `active_booked_total`, `active_paid_total`, `cancelled_collected_total`,
+  `outstanding_total`, booleans `totals_match`/`consistent`, and issue counts:
+  `overpaid_appointments`, `payments_without_matching_audit`,
+  `audits_without_matching_payment`, `inconsistent_payment_intents`,
+  `future_dated_payments`.
+
+Both reads use the same business lock as financial writers. Reconciliation spans
+all records, never a paginated subset. Collected = active paid + cancelled paid;
+active booked = active paid + outstanding. Cancelled receipts stay collected, and
+cancelled bookings are excluded from outstanding. Missing legacy audits trigger
+review without inventing historical operator attribution. Checks report internal
+ledger consistency, not provider settlement, fraud detection or automatic repair.
+No customer names, emails, phone numbers, references, passwords or JWTs appear in
+audit rows or reconciliation results. IDs remain subject to access/retention policy.
+
+Run rollback-only tests with the existing database opt-in. Committed race tests
+create a uniquely named `salonpulse_test_<UUID>` schema, migrate it, and drop only
+that owned/marked disposable schema afterward. Public row IDs are compared before
+and after. Browser tests use the same isolation with a dedicated API on 8010 and
+Vite on 5174. Do not delete audit records or disable triggers for fixture cleanup.
+
+Append-only protection covers ordinary DML, not a database owner/superuser disabling
+triggers or changing DDL. Production needs a separate migration owner, restricted
+runtime role, immutable backups/monitoring and a reviewed retention policy. The
+current application role still owns the local development schema.
 
 ## Production security
 

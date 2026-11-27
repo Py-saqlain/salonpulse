@@ -2,7 +2,7 @@ const cdpOrigin = process.env.SALONPULSE_CDP_URL ?? 'http://127.0.0.1:9223';
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(cdpOrigin)) throw new Error('CDP must use a local HTTP endpoint');
 // Opt-in real Chrome verification. Requires localhost services, Chrome CDP on 9223,
 // and the existing backend venv. Creates two unique businesses; always cleans only those.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,39 +13,23 @@ import { waitForCondition } from './browser-readiness.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backend = resolve(root, '../backend');
 const accounts = [0, 1].map(() => ({ business_name: '__day7_browser__' + randomUUID(), full_name: 'Temporary owner', email: 'browser-' + randomUUID() + '@example.com', password: randomBytes(24).toString('base64url') }));
-const markers = accounts.map(({ business_name, email }) => ({ name: business_name, email }));
 
-function database(cleanup = false) {
+function database(operation, schema = '') {
   const code = `
 import json,sys
-from sqlalchemy import create_engine,select,delete
-from sqlalchemy.engine import make_url
-from app.core.config import Settings
-from app.models import Business,User,Customer,Staff,Service,Appointment,Payment,PaymentIntent
-markers=json.loads(sys.argv[1]); cleanup=sys.argv[2]=='true'
-url=make_url(Settings().database_url.get_secret_value())
-assert url.drivername=='postgresql+psycopg' and url.host in ('localhost','127.0.0.1','::1') and url.database=='salonpulse_dev' and url.username=='salonpulse_app' and url.port==5432
-engine=create_engine(url,hide_parameters=True)
-try:
- if cleanup:
-  with engine.begin() as c:
-   for marker in markers:
-    ids=c.scalars(select(Business.id).where(Business.name==marker['name'])).all()
-    assert len(ids)<=1
-    for business_id in ids:
-     assert c.scalars(select(User.email).where(User.business_id==business_id)).all()==[marker['email']]
-     for model in (PaymentIntent,Payment,Appointment,Customer,Staff,Service,User): c.execute(delete(model).where(model.business_id==business_id))
-     c.execute(delete(Business).where(Business.id==business_id,Business.name==marker['name']))
- with engine.connect() as c:
-  print(json.dumps({model.__tablename__:sorted(str(value) for value in c.scalars(select(model.id))) for model in (Business,User,Customer,Staff,Service,Appointment,Payment,PaymentIntent)}))
-finally: engine.dispose()
+sys.path.insert(0,'tests')
+from isolated_db import create_schema,drop_schema,public_snapshot
+if sys.argv[1]=='snapshot': print(json.dumps(public_snapshot(),sort_keys=True))
+elif sys.argv[1]=='create': print(create_schema())
+elif sys.argv[1]=='drop': drop_schema(sys.argv[2]); print('Disposable schema removed')
+else: raise ValueError()
 `;
-  const result = spawnSync(resolve(backend, '.venv/Scripts/python.exe'), ['-B', '-c', code, JSON.stringify(markers), String(cleanup)], { cwd: backend, env: { ...process.env, DEBUG: 'false', PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8' });
-  if (result.status !== 0) throw new Error('Database safety/cleanup verification failed (private details suppressed)');
+  const result = spawnSync(resolve(backend,'.venv/Scripts/python.exe'),['-B','-c',code,operation,schema],{cwd:backend,env:{...process.env,DEBUG:'false',PYTHONDONTWRITEBYTECODE:'1'},encoding:'utf8'});
+  if (result.status !== 0) throw new Error('Isolated database safety/cleanup verification failed (private details suppressed)');
   return result.stdout.trim();
 }
-
-const baseline = database();
+const baseline = database('snapshot');
+let schema, server;
 let socket;
 let pageId;
 let sequence = 0;
@@ -87,6 +71,19 @@ async function login(account) {
 }
 
 try {
+  // Refuse to reuse an unknown API process; each suite owns its isolated server.
+  let occupied=false;
+  try { await fetch('http://127.0.0.1:8010/health',{signal:AbortSignal.timeout(1000)});occupied=true; } catch {}
+  if(occupied) throw new Error('Isolated test API port 8010 is already occupied');
+  schema=database('create');process.env.SALONPULSE_TEST_SCHEMA=schema;
+  server=spawn(resolve(backend,'.venv/Scripts/python.exe'),['-B','tests/serve_isolated.py','8010'],{cwd:backend,env:{...process.env,DEBUG:'false',PYTHONDONTWRITEBYTECODE:'1'},stdio:['pipe','ignore','ignore']});
+  let started=false;
+  for(let i=0;i<100;i++) {
+    try { const response=await fetch('http://127.0.0.1:8010/health/db',{signal:AbortSignal.timeout(1000)});if(response.status===200){started=true;break;} }catch{}
+    if(server.exitCode!==null)break;
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  if(!started)throw new Error('Isolated backend failed to start');
   // Own a fresh tab rather than attaching to a prior test's navigating target.
   const response = await fetch(cdpOrigin + '/json/new?about:blank', { method: 'PUT' });
   if (!response.ok) throw new Error('Could not create a fresh verification tab');
@@ -106,10 +103,10 @@ try {
           request.reject(error);
         } else request.resolve(data.result);
       }
-    } else if (data.method === 'Network.requestWillBeSent' && data.params.request.url.startsWith('http://127.0.0.1:8000/')) {
+    } else if (data.method === 'Network.requestWillBeSent' && data.params.request.url.startsWith('http://127.0.0.1:8010/')) {
       calls.push(new URL(data.params.request.url).pathname);
       traffic.push({ path: new URL(data.params.request.url).pathname, method: data.params.request.method, offset: new URL(data.params.request.url).searchParams.get('offset') });
-    } else if (data.method === 'Network.responseReceived' && data.params.response.url.startsWith('http://127.0.0.1:8000/')) {
+    } else if (data.method === 'Network.responseReceived' && data.params.response.url.startsWith('http://127.0.0.1:8010/')) {
       responses.push({ path: new URL(data.params.response.url).pathname, status: data.params.response.status });
     } else if (data.method === 'Runtime.exceptionThrown') exceptions++;
     else if (data.method === 'Fetch.requestPaused') {
@@ -119,19 +116,24 @@ try {
       }
       if (interception) { void interception(data.params); return; }
       const response = JSON.stringify({ detail: 'Not authenticated' });
-      void command('Fetch.fulfillRequest', { requestId: data.params.requestId, responseCode: 401, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Access-Control-Allow-Origin', value: 'http://127.0.0.1:5173' }, { name: 'WWW-Authenticate', value: 'Bearer' }], body: Buffer.from(response).toString('base64') });
+      void command('Fetch.fulfillRequest', { requestId: data.params.requestId, responseCode: 401, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Access-Control-Allow-Origin', value: 'http://127.0.0.1:5174' }, { name: 'WWW-Authenticate', value: 'Bearer' }], body: Buffer.from(response).toString('base64') });
     }
   };
   await command('Runtime.enable'); await command('Page.enable'); await command('Network.enable');
   await command('Emulation.setDeviceMetricsOverride', { width: 1365, height: 900, deviceScaleFactor: 1, mobile: false });
-  const navigation = await command('Page.navigate', { url: 'http://127.0.0.1:5173/#customers' });
+  const navigation = await command('Page.navigate', { url: 'http://127.0.0.1:5174/#customers' });
   if (navigation.errorText) throw new Error('Frontend navigation failed: ' + navigation.errorText);
   // Reloading immediately after navigate races Chrome's active-page swap.
-  await wait('location.origin==="http://127.0.0.1:5173" && document.readyState!=="loading" && !!document.querySelector(".auth-form")', 'protected route');
+  await wait('location.origin==="http://127.0.0.1:5174" && document.readyState!=="loading" && !!document.querySelector(".auth-form")', 'protected route');
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--analytics')) {
+  if (process.argv.includes('--audit')) {
+    const { verifyAudit } = await import('./browser-audit.mjs');
+    await verifyAudit({accounts,command,evaluate,wait,route,submit,logout,login,check});
+    check(exceptions === 0,'Browser runtime exceptions');
+    console.log(`PASS: ${checks} live audit/reconciliation browser checks.`);
+  } else if (process.argv.includes('--analytics')) {
     const { verifyAnalytics } = await import('./browser-analytics.mjs');
     await verifyAnalytics({ accounts, command, evaluate, wait, route, submit, logout, login, check });
     check(exceptions === 0, 'Browser runtime exceptions');
@@ -198,7 +200,7 @@ try {
   await wait('!!document.querySelector("[role=alert]")', 'network error');
   check(await evaluate('document.querySelector("[role=alert]").textContent.includes("Cannot reach")'), 'Network error missing');
   await command('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
-  await command('Fetch.enable', { patterns: [{ urlPattern: '*:8000/api/auth/me', requestStage: 'Request' }] });
+  await command('Fetch.enable', { patterns: [{ urlPattern: '*:8010/api/auth/me', requestStage: 'Request' }] });
   await submit({ email: accounts[0].email, password: accounts[0].password });
   await wait('document.body.textContent.includes("session has ended")', 'authenticated 401');
   check(await evaluate('!document.querySelector(".app-shell")'), '401 did not clear auth');
@@ -231,7 +233,12 @@ try {
   socket?.close();
   for (const request of pending.values()) clearTimeout(request.timer);
   if (pageId) await fetch(cdpOrigin + '/json/close/' + pageId);
-  const after = database(true);
-  if (after !== baseline) { console.error('FAIL: Database baseline mismatch after cleanup'); process.exitCode = 1; }
-  else console.log('PASS: Temporary businesses/accounts cleaned up; all eight tables restored to baseline.');
+  if(server && server.exitCode===null) {
+    server.stdin.end('q');
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Isolated test server shutdown timed out')),10000);server.once('exit',()=>{clearTimeout(timer);resolve();});});
+  }
+  if(schema) database('drop',schema);
+  const after=database('snapshot');
+  if(after!==baseline){console.error('FAIL: Public database baseline mismatch');process.exitCode=1;}
+  else console.log('PASS: Disposable schema removed with all temporary records; nine public application tables unchanged.');
 }

@@ -10,6 +10,7 @@ from app.models import Appointment, AppointmentStatus, Payment, PaymentIntent, P
 from app.schemas.payments import PaymentCreate, PaymentRecoveryResponse
 from app.services.payments import appointment_payment_summary, payment_fingerprint, record_payment_locked
 from app.services.resources import resource_write
+from app.services.audit import append_audit
 
 
 def owned_intent(session, scope, user_id, appointment_id, intent_id):
@@ -70,6 +71,7 @@ def create_intent(session, scope, user_id, appointment_id, data):
             appointment_id=appointment_id, state=PaymentIntentState.PENDING, amount=data.amount, method=data.method,
             reference=data.reference, paid_at=data.paid_at, request_fingerprint=payment_fingerprint(appointment_id, data))
         session.add(intent); session.flush()
+        append_audit(session, scope, "payment_intent.created", intent.id, user_id)
         response = recovery_response(session, scope, intent)
     return response
 
@@ -112,6 +114,7 @@ def transition_intent(session, scope, user_id, appointment_id, intent_id, action
         elif action == 'cancel' and intent.state == PaymentIntentState.PENDING:
             intent.state = PaymentIntentState.CANCELLED
             intent.resolved_at = datetime.now(timezone.utc)
+            append_audit(session, scope, "payment_intent.cancelled", intent.id, user_id)
         elif action == 'acknowledge':
             if intent.state == PaymentIntentState.PENDING:
                 raise HTTPException(409, 'Confirm or cancel the pending payment before continuing')

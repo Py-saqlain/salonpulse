@@ -13,6 +13,7 @@ from app.services.working_hours import ensure_working_hours
 from app.models import Appointment, AppointmentStatus, AppointmentType, Business, Customer, Service, Staff
 from app.schemas.appointments import AppointmentCreate, AppointmentPatch, AppointmentResponse
 from app.services.resources import resource_write
+from app.services.audit import append_audit
 
 
 BLOCKING_STATUSES = (AppointmentStatus.CONFIRMED, AppointmentStatus.IN_PROGRESS)
@@ -76,6 +77,7 @@ def create_appointment(session: Session, scope: TenantScope, data: AppointmentCr
         )
         session.add(appointment)
         session.flush()
+        append_audit(session, scope, "appointment.created", appointment.id)
         response = AppointmentResponse.model_validate(appointment)
     return response
 
@@ -93,6 +95,7 @@ def patch_appointment(session: Session, scope: TenantScope, appointment_id, data
     with resource_write(session, foreign_key_detail=REFERENCE_CONFLICT):
         business = lock_business(session, scope)
         appointment = scope.get(session, Appointment, appointment_id)
+        old_status, old_price, old_minutes = appointment.status, appointment.booked_price, appointment.booked_duration_minutes
         booking_fields = data.model_fields_set & {"customer_id", "staff_id", "service_id", "starts_at"}
         scheduling = bool(booking_fields or data.recalculate_service)
         target = data.status if data.status is not None else appointment.status
@@ -123,6 +126,11 @@ def patch_appointment(session: Session, scope: TenantScope, appointment_id, data
         change_status(appointment, target)
         values["status"] = target
         updated = scope.update(session, Appointment, appointment.id, values)
+        if target != old_status:
+            append_audit(session, scope, 'appointment.cancelled' if target == AppointmentStatus.CANCELLED else 'appointment.status_changed', updated.id)
+        elif scheduling:
+            action = 'appointment.repriced' if (old_price,old_minutes) != (updated.booked_price,updated.booked_duration_minutes) else 'appointment.updated'
+            append_audit(session, scope, action, updated.id)
         response = AppointmentResponse.model_validate(updated)
     return response
 
@@ -133,8 +141,11 @@ def cancel_appointment(session: Session, scope: TenantScope, appointment_id):
         appointment = scope.get(session, Appointment, appointment_id)
         if appointment.status == AppointmentStatus.COMPLETED:
             raise HTTPException(409, "Completed appointment history cannot be deleted")
+        changed = appointment.status != AppointmentStatus.CANCELLED
         change_status(appointment, AppointmentStatus.CANCELLED)
         scope.update(session, Appointment, appointment.id, {"status": AppointmentStatus.CANCELLED})
+        if changed:
+            append_audit(session, scope, "appointment.cancelled", appointment.id)
 
 
 def list_appointments(session: Session, scope: TenantScope, limit, offset, day=None, staff_id=None, status=None):

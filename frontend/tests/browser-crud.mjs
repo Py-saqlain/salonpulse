@@ -12,10 +12,10 @@ export async function verifyCrud({ accounts, command, evaluate, wait, route, sub
   const tokens = [];
   async function api(index, path, method = 'GET', body) {
     if (!tokens[index]) {
-      const response = await fetch('http://127.0.0.1:8000/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
+      const response = await fetch('http://127.0.0.1:8010/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
       check(response.status === 200, 'Fixture login'); tokens[index] = (await response.json()).access_token;
     }
-    const response = await fetch('http://127.0.0.1:8000/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await fetch('http://127.0.0.1:8010/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: response.status === 204 ? null : await response.json() };
   }
   async function list(resource) { const result = await api(0, resource + '?limit=100'); check(result.status === 200, 'Read saved directory'); return result.data.items; }
@@ -57,7 +57,7 @@ export async function verifyCrud({ accounts, command, evaluate, wait, route, sub
   function fixture(operation, records = {}) {
     const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
     const code = `
-import json,sys
+import json,sys,os
 from datetime import datetime,timedelta,timezone
 from sqlalchemy import create_engine,select
 from sqlalchemy.engine import make_url
@@ -67,7 +67,9 @@ from app.models import Business,User,UserRole,Customer,Staff,Service,Appointment
 from uuid import UUID
 data=json.loads(sys.argv[1]); url=make_url(Settings().database_url.get_secret_value())
 assert url.host in ('localhost','127.0.0.1','::1') and url.database=='salonpulse_dev' and url.username=='salonpulse_app' and url.port==5432
-engine=create_engine(url,hide_parameters=True)
+sys.path.insert(0,'tests')
+from isolated_db import test_engine
+engine=test_engine(os.environ['SALONPULSE_TEST_SCHEMA'])
 try:
  with Session(engine) as session,session.begin():
   business=session.scalar(select(Business).where(Business.name==data['business_name']))

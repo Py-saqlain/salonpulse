@@ -94,6 +94,36 @@ but their existing receipts remain collected because refunds are not implemented
 Free appointments count as paid. Financial analytics and receipt history are owner-only.
 Staff see necessary appointment balances and their own pending payment details.
 
+## Audit history and financial reconciliation
+
+Owners can open **Audit & reconciliation** for paginated, filterable operator history
+and all-time ledger checks. Staff cannot access either API or screen.
+
+- `GET /api/audit-logs?limit=20&offset=0&action=payment.recorded`: owner-only
+  history; optional `action` and `resource_id` filters. Maximum page size 100.
+- `GET /api/finance/reconciliation`: owner-only all-time receipt totals, active
+  booked/paid/outstanding values, cancelled collections and inconsistency counts.
+
+Migration `1deb66be8c11` adds immutable audit metadata. Records contain only tenant,
+operator and resource UUIDs, a fixed action and database timestamp. Payments,
+bookings/cancellations/repricing, service changes and payment-intent creation or
+cancellation append audit rows in the same transaction. Failed audit inserts roll
+back the operation; an idempotent payment replay creates no extra financial audit.
+PostgreSQL rejects UPDATE, DELETE and TRUNCATE on audit history.
+
+Reconciliation checks overpayments, missing/mismatched payment audits, inconsistent
+recovery records, future-dated receipts and exact Decimal balance equations. It
+never repairs records or compares bank/provider settlements. Cancelled receipts
+remain collected; cancelled appointments have no outstanding balance. Older
+receipts without audit attribution are flagged for review, never backfilled with
+invented operators. Audit metadata does not store old/new prices or personal data.
+
+The application role currently owns its schema and can execute privileged DDL.
+Use a separate migration owner and a restricted runtime role, retention policies,
+backups and external monitoring before treating logs as tamper-resistant against
+a database administrator. Test fixtures use disposable marked schemas; audit
+protection is never disabled to clean up records in the development schema.
+
 ## Verification
 
 ```powershell
@@ -112,19 +142,20 @@ $env:SALONPULSE_RUN_DB_TESTS = '1'
 ```
 
 Live database tests accept only the guarded local development database; they use
-rollback or uniquely marked fixtures with targeted cleanup. Browser suites require
-running servers and an isolated Chrome CDP session; see the frontend README.
+rollback or migrated disposable schemas with guarded cleanup. Browser suites
+require the dedicated Vite server on 5174 and an isolated Chrome CDP session;
+the harness owns its API on 8010. See the frontend README.
 
 ## Remaining production work
 
 Payments are recorded accounting entries, with no bank/provider settlement checks,
-gateways, refunds or corrections workflow. Receipt timestamps exist, but an
-immutable operator audit trail is not implemented. Per-business transaction locks
+gateways, refunds or corrections workflow. Sensitive financial and booking changes
+now have an append-only operator audit trail. Per-business transaction locks
 serialize financial and booking operations; production load/latency testing is
 still needed. Direct SQL writers must follow the same locking/validation protocol;
 aggregate overpayment protection is enforced by application transactions rather
-than a database aggregate constraint. Session recovery, deployment hardening,
-monitoring and backup/restore verification remain production-readiness work.
+than a database aggregate constraint. Deployment verification, monitoring, provider
+settlement and backup/restore drills remain production-readiness work.
 
 
 ## Production security

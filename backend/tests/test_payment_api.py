@@ -61,7 +61,7 @@ class PaymentContractTests(unittest.TestCase):
         scripts = ScriptDirectory.from_config(config)
         revision = scripts.get_revision('9b54ee7f2482')
         self.assertEqual(revision.down_revision, 'e11993c1b0a3')
-        self.assertEqual(scripts.get_heads(), ["894cc829413f"])
+        self.assertEqual(scripts.get_heads(), ["1deb66be8c11"])
         statements = []
         engine = create_mock_engine('postgresql+psycopg://', lambda sql, *a, **kw: statements.append(sql))
         with Operations.context(MigrationContext.configure(connection=engine, opts={'target_metadata': Base.metadata})):
@@ -196,7 +196,6 @@ class PaymentAPITests(AppointmentFixture):
 class PaymentConcurrencyTests(AppointmentConcurrencyFixture):
     def seeded_booking(self):
         scope, payload = self.seed_committed_fixture()
-        self.addCleanup(self.remove_receipts, scope)
         with Session(self.engine, expire_on_commit=False) as session:
             booking = create_appointment(session, scope, payload)
         return scope, booking

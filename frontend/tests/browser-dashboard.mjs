@@ -9,16 +9,16 @@ export async function verifyDashboard({ accounts, command, evaluate, wait, route
   const tokens = [];
   async function api(index, path, method = 'GET', body) {
     if (!tokens[index]) {
-      const response = await fetch('http://127.0.0.1:8000/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
+      const response = await fetch('http://127.0.0.1:8010/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: accounts[index].email, password: accounts[index].password }) });
       check(response.status === 200, 'Dashboard fixture login'); tokens[index] = (await response.json()).access_token;
     }
-    const response = await fetch('http://127.0.0.1:8000/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await fetch('http://127.0.0.1:8010/api/' + path, { method, headers: { Authorization: 'Bearer ' + tokens[index], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: response.status === 204 ? null : await response.json() };
   }
   function database(index, seed = false) {
     const backend = fileURLToPath(new URL('../../backend/', import.meta.url));
     const code = `
-import json,sys
+import json,sys,os
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from uuid import UUID,uuid4
@@ -30,7 +30,9 @@ from app.core.config import Settings
 from app.models import Business,User,Customer,Staff,Service,Appointment,AppointmentStatus,AppointmentType
 d=json.loads(sys.argv[1]);u=make_url(Settings().database_url.get_secret_value())
 assert u.drivername=='postgresql+psycopg' and u.host in ('localhost','127.0.0.1','::1') and u.database=='salonpulse_dev' and u.username=='salonpulse_app' and u.port==5432
-e=create_engine(u,hide_parameters=True)
+sys.path.insert(0,'tests')
+from isolated_db import test_engine
+e=test_engine(os.environ['SALONPULSE_TEST_SCHEMA'])
 try:
  with Session(e) as s,s.begin():
   b=s.scalar(select(Business).where(Business.name==d['business_name']));assert b is not None and b.name.startswith('__day7_browser__')

@@ -25,7 +25,7 @@ class ModelTests(unittest.TestCase):
             configure_mappers()
 
     def test_all_models_registered_and_postgresql_ddl_compiles(self):
-        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments", "users", "payments", "payment_intents"})
+        self.assertEqual(set(Base.metadata.tables), {"businesses", "customers", "staff", "services", "appointments", "users", "payments", "payment_intents", "audit_logs"})
         for table in Base.metadata.sorted_tables:
             ddl = str(CreateTable(table).compile(dialect=self.dialect))
             self.assertIn("CREATE TABLE", ddl)
@@ -47,12 +47,16 @@ class ModelTests(unittest.TestCase):
 
     def test_timestamps_and_business_defaults(self):
         for table in Base.metadata.tables.values():
-            for name in ["created_at", "updated_at"]:
+            names = ["created_at"] if table.name == "audit_logs" else ["created_at", "updated_at"]
+            for name in names:
                 column = table.c[name]
                 self.assertFalse(column.nullable)
                 self.assertTrue(column.type.timezone)
                 self.assertIsNotNone(column.server_default)
-            self.assertIsNotNone(table.c.updated_at.onupdate)
+            if table.name == "audit_logs":
+                self.assertNotIn("updated_at", table.c)
+            else:
+                self.assertIsNotNone(table.c.updated_at.onupdate)
         self.assertEqual(Business.__table__.c.timezone.default.arg, "Asia/Karachi")
         self.assertEqual(Business.__table__.c.currency.default.arg, "PKR")
 

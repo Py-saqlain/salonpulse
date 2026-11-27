@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import Settings
+from isolated_db import DisposableSchema
 from app.db.base import Base
 import app.models
 from app.models import Business, User, Payment, PaymentIntent, Appointment, Customer, Staff, Service
@@ -29,14 +30,14 @@ from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.engine import make_url
 
 
-def main():
+def verify_http(isolated):
     assert os.environ.get('SALONPULSE_RUN_DB_TESTS') == '1', 'Explicit DB test opt-in required'
     url = make_url(Settings().database_url.get_secret_value())
     assert (url.database, url.username, url.port) == ('salonpulse_dev', 'salonpulse_app', 5432)
     assert url.host in ('127.0.0.1', 'localhost', '::1')
-    engine = create_engine(url, hide_parameters=True)
+    engine = isolated.engine
     with engine.connect() as connection:
-        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '894cc829413f'
+        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '1deb66be8c11'
         baseline = {name: set(connection.scalars(select(table.c.id))) for name, table in Base.metadata.tables.items()}
     marker = '__payment_http__' + uuid4().hex
     accounts = [dict(business_name=marker + str(i), full_name='Payment HTTP owner',
@@ -45,9 +46,9 @@ def main():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
     origin = f'http://127.0.0.1:{port}'
-    process = subprocess.Popen([sys.executable, '-B', '-m', 'app.serve', '--host', '127.0.0.1', '--port', str(port)],
-        cwd=Path(__file__).resolve().parents[1], env={**os.environ, 'DEBUG': 'false', 'PYTHONDONTWRITEBYTECODE': '1'},
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen([sys.executable, '-B', 'tests/serve_isolated.py', str(port)],
+        cwd=Path(__file__).resolve().parents[1], env={**os.environ, 'DEBUG': 'false', 'PYTHONDONTWRITEBYTECODE': '1', 'SALONPULSE_TEST_SCHEMA': isolated.name},
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     checks = 0
 
     def check(condition, message):
@@ -181,30 +182,21 @@ def main():
         check(call('GET', '/health/db') == (200, {'status': 'ok'}), 'Database health failed')
         print(f'PASS: {checks} real HTTP payment checks across two businesses.')
     finally:
-        process.terminate()
+        if process.poll() is None:
+            process.stdin.write(b'q'); process.stdin.close()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill(); process.wait(timeout=5)
-        try:
-            with engine.begin() as connection:
-                for account in accounts:
-                    business_id = connection.scalar(select(Business.id).where(Business.name == account['business_name']))
-                    if business_id is None:
-                        continue
-                    assert account['business_name'].startswith(marker)
-                    users = connection.execute(select(User.email).where(User.business_id == business_id)).scalars().all()
-                    assert users == [account['email']], 'Unexpected fixture membership; cleanup refused'
-                    for model in (PaymentIntent, Payment, Appointment, Customer, Staff, Service, User):
-                        connection.execute(delete(model).where(model.business_id == business_id))
-                    connection.execute(delete(Business).where(Business.id == business_id, Business.name == account['business_name']))
-            with engine.connect() as connection:
-                after = {name: set(connection.scalars(select(table.c.id))) for name, table in Base.metadata.tables.items()}
-                assert after == baseline, 'Database baseline mismatch after cleanup'
-            print('PASS: HTTP fixtures removed; all eight application tables restored to original record IDs.')
-        finally:
-            engine.dispose()
 
+
+
+
+def main():
+    assert os.environ.get('SALONPULSE_RUN_DB_TESTS') == '1', 'Explicit DB test opt-in required'
+    with DisposableSchema() as isolated:
+        verify_http(isolated)
+    print('PASS: Disposable HTTP schema removed; all nine public application tables unchanged.')
 
 if __name__ == '__main__':
     try:
