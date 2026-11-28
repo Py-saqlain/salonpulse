@@ -25,7 +25,7 @@ def create_customer(data: CustomerCreate, scope: Scope, session: DatabaseSession
 @router.get("", response_model=Page[CustomerResponse])
 def list_customers(scope: Scope, session: DatabaseSession,
                    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-                   offset: Annotated[int, Query(ge=0)] = 0):
+                   offset: Annotated[int, Query(ge=0, le=100000)] = 0):
     return list_resources(session, scope, Customer, limit, offset)
 
 

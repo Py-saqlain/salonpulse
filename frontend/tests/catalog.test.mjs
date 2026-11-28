@@ -39,14 +39,15 @@ test('service adapters map duration and exact decimal strings without tenant/ide
   for (const price of ['NaN', '-1.00', '12.345', '10000000000.00']) assert.throws(() => domain.serviceFromAPI({ ...row(3), price }));
 });
 
-test('all backend pages are loaded so search and selectors include records beyond page one', async () => {
+test('compatibility readers paginate small directories and refuse unbounded catalog downloads', async () => {
   const requests = [];
   const client = new ApiClient('http://localhost:8000', { fetcher: async url => {
     const offset = Number(new URL(url).searchParams.get('offset')); requests.push(offset);
-    return Response.json({ items: Array.from({ length: Math.min(100, 205 - offset) }, (_, index) => row(offset + index)), total: 205, limit: 100, offset });
+    return Response.json({ items: Array.from({ length: Math.min(100, 150 - offset) }, (_, index) => row(offset + index)), total: 150, limit: 100, offset });
   } });
   const records = await domain.readAll(client, 'customers', business, new AbortController().signal);
-  assert.equal(records.length, 205); assert.equal(records[204].name, 'Customer 204'); assert.deepEqual(requests, [0, 100, 200]);
+  assert.equal(records.length,150);assert.equal(records[149].name,'Customer 149');assert.deepEqual(requests,[0,100]);
+  await assert.rejects(domain.readAll({request:async()=>({items:[],total:5000,limit:100,offset:0})},'customers',business,new AbortController().signal),/paginated workspace/);
 });
 
 test('pagination rejects foreign tenants, duplicate IDs and incomplete/changing pages', async () => {

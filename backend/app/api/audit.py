@@ -20,7 +20,7 @@ def history(scope:Scope, session:DatabaseSession, query:Annotated[AuditQuery,Que
     if query.resource_id is not None:statement=statement.where(AuditLog.resource_id==query.resource_id)
     # One writer lock makes count and pagination internally consistent.
     from app.db.locking import lock_business
-    lock_business(session,scope)
+    lock_business(session,scope,shared=True)
     total=session.scalar(select(func.count()).select_from(statement.subquery()))
     items=session.scalars(statement.order_by(AuditLog.created_at.desc(),AuditLog.id.desc()).limit(query.limit).offset(query.offset)).all()
     return dict(items=items,total=total,limit=query.limit,offset=query.offset)

@@ -7,7 +7,7 @@ from app.models import AuditAction
 class AuditQuery(BaseModel):
     model_config = ConfigDict(extra='forbid')
     limit: int = Field(default=20,ge=1,le=100)
-    offset: int = Field(default=0,ge=0)
+    offset: int = Field(default=0,ge=0,le=100000)
     action: AuditAction | None = None
     resource_id: UUID | None = None
 

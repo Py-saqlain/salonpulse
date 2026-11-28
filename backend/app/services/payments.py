@@ -120,7 +120,7 @@ def get_payment(session: Session, scope: TenantScope, payment_id: UUID):
 
 def payment_history(session: Session, scope: TenantScope, appointment_id: UUID, limit: int, offset: int):
     # Keep totals and paginated history consistent while a concurrent receipt waits.
-    lock_business(session, scope)
+    lock_business(session, scope, shared=True)
     summary = appointment_payment_summary(session, scope, appointment_id)
     statement = select(Payment).where(Payment.business_id == scope.business_id, Payment.appointment_id == appointment_id)
     total = session.scalar(select(func.count()).select_from(statement.subquery()))

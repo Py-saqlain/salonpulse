@@ -38,7 +38,7 @@ def recovery_response(session, scope, intent):
 
 
 def active_intent(session, scope, user_id, appointment_id):
-    lock_business(session, scope)
+    lock_business(session, scope, shared=True)
     scope.get(session, Appointment, appointment_id)
     intent = unresolved_intent(session, scope, user_id, appointment_id)
     return recovery_response(session, scope, intent) if intent else None

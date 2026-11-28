@@ -11,9 +11,9 @@ import type { Service, ServiceInput } from './services';
 export type Resource = 'customers' | 'staff' | 'services';
 export type TenantDTO = { id: string; business_id: string; created_at: string; updated_at: string };
 type RecordDTO = TenantDTO & { name: string };
-export type CustomerDTO = RecordDTO & { phone: string | null; notes: string | null };
-export type StaffDTO = RecordDTO & { phone: string | null; specialty: string | null; active: boolean; hours: WorkingDay[] | null };
-export type ServiceDTO = RecordDTO & { category: string | null; description: string; duration_minutes: number; price: string; active: boolean };
+export type CustomerDTO = RecordDTO & { phone: string | null; notes: string | null; completedVisits?: number; lastCompleted?: string | null };
+export type StaffDTO = RecordDTO & { phone: string | null; specialty: string | null; active: boolean; hours: WorkingDay[] | null; todayCount?: number; upcomingCount?:number };
+export type ServiceDTO = RecordDTO & { category: string | null; description: string; upcomingCount?:number; duration_minutes: number; price: string; active: boolean };
 export type Catalog = { customers: Customer[]; staff: Staff[]; services: Service[]; appointments: Appointment[] };
 type PageDTO<T> = { items: T[]; total: number; limit: number; offset: number };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -22,17 +22,18 @@ export function checkRecord<T extends TenantDTO>(record: T, businessId: string):
   if (!uuid.test(record.id) || record.business_id !== businessId) throw new Error('The server returned an unexpected business record. Refresh before continuing.');
   return record;
 }
-export const customerFromAPI = (item: CustomerDTO): Customer => ({ id: item.id, name: item.name, phone: item.phone ?? '', notes: item.notes ?? '' });
-export const staffFromAPI = (item: StaffDTO): Staff => ({ id: item.id, name: item.name, phone: item.phone ?? '', specialty: item.specialty ?? '', active: item.active, hours: item.hours });
+export const customerFromAPI = (item: CustomerDTO): Customer => ({ id: item.id, name: item.name, phone: item.phone ?? '', notes: item.notes ?? '', ...(item.completedVisits===undefined?{}:{completedVisits:item.completedVisits,lastCompleted:item.lastCompleted}) });
+export const staffFromAPI = (item: StaffDTO): Staff => ({ id: item.id, name: item.name, phone: item.phone ?? '', specialty: item.specialty ?? '', active: item.active, hours: item.hours, ...(item.todayCount===undefined?{}:{todayCount:item.todayCount}),...(item.upcomingCount===undefined?{}:{upcomingCount:item.upcomingCount}) });
 export function serviceFromAPI(item: ServiceDTO): Service {
   if (!/^\d+(?:\.\d{1,2})?$/.test(item.price) || !Number.isFinite(Number(item.price)) || Number(item.price) > 9999999999.99) throw new Error('The server returned an invalid service price.');
-  return { id: item.id, name: item.name, category: item.category ?? '', description: item.description, minutes: item.duration_minutes, price: Number(item.price), active: item.active };
+  return { id: item.id, name: item.name, category: item.category ?? '', description: item.description, minutes: item.duration_minutes, price: Number(item.price), active: item.active,...(item.upcomingCount===undefined?{}:{upcomingCount:item.upcomingCount}) };
 }
 export const customerToAPI = (input: CustomerInput) => ({ name: input.name.trim(), phone: normalizePhone(input.phone) || null, notes: input.notes.trim() || null });
 export const staffToAPI = (input: StaffInput) => ({ name: input.name.trim(), phone: normalizePhone(input.phone) || null, specialty: input.specialty.trim() || null, active: input.active, hours: input.hours });
 export const serviceToAPI = (input: ServiceInput) => ({ name: input.name.trim(), category: input.category.trim() || null, description: input.description.trim(), duration_minutes: input.minutes, price: input.price.toFixed(2), active: input.active });
 
 export async function readAll<T extends TenantDTO>(api: ApiClient, resource: Resource | 'appointments', businessId: string, signal: AbortSignal): Promise<T[]> {
+  // Compatibility reader is bounded; production workspace reads never call it.
   const records: T[] = []; const ids = new Set<string>(); let total: number | undefined;
   do {
     if (signal.aborted) throw new Error('Request cancelled');
@@ -41,6 +42,7 @@ export async function readAll<T extends TenantDTO>(api: ApiClient, resource: Res
     if (!Number.isSafeInteger(page.total) || page.total < 0 || page.offset !== records.length || page.limit !== 100 || !Array.isArray(page.items)
       || page.items.length > 100 || (total !== undefined && total !== page.total)) throw new Error('The directory changed while loading. Please refresh.');
     total = page.total;
+    if (total > 200) throw new Error('Use paginated workspace search for directories larger than 200 records.');
     for (const item of page.items) {
       checkRecord(item, businessId);
       if (ids.has(item.id)) throw new Error('The directory changed while loading. Please refresh.');

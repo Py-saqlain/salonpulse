@@ -1,0 +1,56 @@
+{
+  "seed": {
+    "customers": 1000,
+    "staff": 10,
+    "services": 30,
+    "appointments": 5000,
+    "payments": 3000
+  },
+  "endpoint_timings": {
+    "/api/workspace?view=dashboard": {
+      "median_ms": 100.27,
+      "max_ms": 373.68
+    },
+    "/api/workspace?view=appointments": {
+      "median_ms": 78.19,
+      "max_ms": 97.54
+    },
+    "/api/analytics/revenue": {
+      "median_ms": 81.63,
+      "max_ms": 92.45
+    },
+    "/api/finance/reconciliation": {
+      "median_ms": 107.71,
+      "max_ms": 152.64
+    }
+  },
+  "catalog_loading": {
+    "requests": 1,
+    "records": 15,
+    "bytes": 5028,
+    "elapsed_ms": 85.76
+  },
+  "load": {
+    "concurrency": 10,
+    "requests": 100,
+    "errors": 0,
+    "p50_ms": 415.74,
+    "p95_ms": 579.64,
+    "elapsed_ms": 4123.33
+  },
+  "directory_plan": {
+    "node": "Limit",
+    "child": "Index Only Scan",
+    "execution_ms": 0.383
+  },
+  "concurrent_payment_retries": {
+    "requests": 20,
+    "receipts_created": 1,
+    "reconciliation_consistent": true
+  },
+  "concurrent_partial_payments": {
+    "requests": 20,
+    "receipts_created": 20,
+    "reconciliation_consistent": true
+  }
+}

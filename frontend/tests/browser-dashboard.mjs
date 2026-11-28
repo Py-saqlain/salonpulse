@@ -77,7 +77,7 @@ finally:e.dispose()
     check(result.status === 0, 'Guarded dashboard database fixture/query');
     return JSON.parse(result.stdout);
   }
-  async function ready() { await wait('!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false', 'dashboard data'); await wait('document.querySelector("[data-revenue-ready=true]") || location.hash!=="#dashboard"', 'dashboard revenue'); }
+  async function ready() { await wait('!!document.querySelector(".app-shell[data-workspace-ready=true]") && document.querySelector(".directory-toolbar button")?.disabled===false', 'dashboard data'); await wait('document.querySelector("[data-revenue-ready=true]") || location.hash!=="#dashboard"', 'dashboard revenue'); }
   async function click(label, scope = 'document') { await evaluate(`([...${scope}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)})).click()`); }
   async function set(selector, value) { await evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});const prototype=input instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()`); }
   async function dashboard() { await evaluate('location.hash="dashboard"'); await ready(); await wait('!!document.querySelector(".dashboard-status-summary")', 'dashboard'); }
@@ -100,24 +100,31 @@ finally:e.dispose()
   await route('register'); await submit(accounts[0]); await wait('!!document.querySelector(".app-shell")', 'first business'); await ready();
   check(await evaluate('[...document.querySelectorAll(".kpi-value")].every(item=>item.textContent==="0"||item.textContent==="PKR 0.00")'), 'New business starts empty without samples');
   let expected = database(0, true); await refresh(); await assertStats(expected);
-  for (const resource of ['appointments','customers','staff']) check(traffic.some(item => item.path === '/api/' + resource && item.method === 'GET' && item.offset === '100'), resource + ' second API page loaded');
+  check(traffic.some(item=>item.path==='/api/workspace'),'Server aggregate requested');
+  check(!traffic.some(item=>['/api/appointments','/api/customers','/api/staff'].includes(item.path)&&item.offset==='100'),'Dashboard did not download whole directories');
   // Read every workload display page, not just its first twenty staff.
   const workload = {};
   while (true) {
     const rows = await evaluate('[...document.querySelectorAll(".workload-row")].map(item=>({id:item.dataset.workloadId,counts:[...item.querySelectorAll(":scope > span")].map(span=>parseInt(span.textContent,10))}))');
     for (const row of rows) workload[row.id] = row.counts;
     if (await evaluate('[...document.querySelectorAll(".dashboard-main-panels section:last-child nav button")].find(button=>button.textContent==="Next").disabled')) break;
-    await click('Next', 'document.querySelector(".dashboard-main-panels section:last-child nav")');
+    await click('Next', 'document.querySelector(".dashboard-main-panels section:last-child nav")');await ready();
   }
   check(JSON.stringify(Object.entries(workload).sort()) === JSON.stringify(Object.entries(expected.workload).sort()), 'Every staff workload page matches PostgreSQL');
   // Return to the first workload page for later positive-workload assertions.
-  while (!await evaluate('[...document.querySelectorAll(".dashboard-main-panels section:last-child nav button")].find(button=>button.textContent==="Previous").disabled')) await click('Previous', 'document.querySelector(".dashboard-main-panels section:last-child nav")');
+  while (!await evaluate('[...document.querySelectorAll(".dashboard-main-panels section:last-child nav button")].find(button=>button.textContent==="Previous").disabled')) {await click('Previous', 'document.querySelector(".dashboard-main-panels section:last-child nav")');await ready();}
   await evaluate('location.hash="customers"'); await wait('!!document.querySelector(".customer-page")', 'customer page');
   await click('Add customer'); await set('.customer-editor input[autocomplete=name]', 'Dashboard extra customer A'); await evaluate('document.querySelector(".customer-editor").requestSubmit()'); await ready(); await wait('!document.querySelector(".customer-editor")', 'saved customer');
   expected = database(0); await assertStats(expected); check(expected.customers === 102, 'Dashboard updated after customer creation');
   const created = (await api(0, 'customers?limit=100')).data.items.find(item => item.name === 'Dashboard extra customer A'); check(!!created, 'New customer persisted');
   await click('New appointment'); await wait('!!document.querySelector("dialog[open]")', 'booking form');
-  await evaluate(`(()=>{const selects=document.querySelectorAll('dialog form:not([hidden]) select');for(const [index,value] of [[0,${JSON.stringify(created.id)}],[1,${JSON.stringify(expected.service)}],[2,${JSON.stringify(expected.staff)}]]){Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(selects[index],value);selects[index].dispatchEvent(new Event('change',{bubbles:true}));}})()`);
+  for(const [index,resource,id] of [[0,'customers',created.id],[1,'services',expected.service],[2,'staff',expected.staff]]) {
+    const record=(await api(0,resource+'/'+id)).data;
+    await evaluate(`(()=>{const input=document.querySelectorAll('dialog .booking-choice-search input')[${index}];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(record.name)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await wait(`Array.from(document.querySelectorAll('dialog form:not([hidden]) select')[${index}].options).some(option=>option.value===${JSON.stringify(id)})`,'global booking choice');
+    await evaluate(`(()=>{const select=document.querySelectorAll('dialog form:not([hidden]) select')[${index}];Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,${JSON.stringify(id)});select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  }
+  await wait('!document.querySelector("dialog form:not([hidden]) button[type=submit]").matches(":disabled")','booking search ready');
   await set('dialog input[type=date]', expected.tomorrow); await set('dialog input[type=time]', '14:00'); await evaluate('document.querySelector("dialog form:not([hidden])").requestSubmit()'); await wait('!document.querySelector("dialog")', 'booking saved'); await ready();
   expected = database(0); await assertStats(expected);
   const createdBooking = (await api(0, 'appointments?date=' + expected.tomorrow + '&staff_id=' + expected.staff + '&limit=100')).data.items.find(item => item.customer_id === created.id); check(!!createdBooking, 'Dashboard booking persisted');

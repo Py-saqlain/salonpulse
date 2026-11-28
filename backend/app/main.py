@@ -24,6 +24,7 @@ from app.api.payments import router as payments_router
 from app.api.analytics import router as analytics_router
 from app.api.payment_recovery import router as recovery_router
 from app.api.audit import router as audit_router
+from app.api.workspace import router as workspace_router
 
 
 def create_app(config: Settings) -> FastAPI:
@@ -53,6 +54,7 @@ def create_app(config: Settings) -> FastAPI:
     application.include_router(analytics_router, responses=API_ERRORS)
     application.include_router(recovery_router, responses=API_ERRORS)
     application.include_router(audit_router, responses=API_ERRORS)
+    application.include_router(workspace_router, responses=API_ERRORS)
 
     @application.exception_handler(RequestValidationError)
     async def safe_validation_error(request, error: RequestValidationError):

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
-export async function verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, cdpOrigin }) {
+export async function verifyAppointments({ accounts, command, evaluate, wait, route, submit, logout, login, check, socket, cdpOrigin, traffic }) {
   socket.addEventListener('message', event => {
     if (JSON.parse(event.data).method === 'Page.javascriptDialogOpening') void command('Page.handleJavaScriptDialog', { accept: true });
   });
@@ -19,7 +19,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   }
   async function post(index, resource, body) { const result = await api(index, resource, 'POST', body); check(result.status === 201, resource + ' fixture creation'); return result.data; }
   async function get(id) { const result = await api(0, 'appointments/' + id); check(result.status === 200, 'Read persisted booking'); return result.data; }
-  async function ready(run = evaluate) { await until(run, '!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false', 'business records'); }
+  async function ready(run = evaluate) { await until(run, '!!document.querySelector(".app-shell[data-workspace-ready=true]") && document.querySelector(".directory-toolbar button")?.disabled===false', 'business records'); }
   async function until(run, expression, label) {
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
@@ -37,7 +37,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   const article = id => `document.querySelector('[data-appointment-id="${id}"]')`;
   async function edit(id) { await appointments(); await click('Edit', article(id)); await wait('!!document.querySelector("dialog[open]")', 'edit form'); }
   async function close() { await evaluate('document.querySelector("dialog .icon-button").click()'); await wait('!document.querySelector("dialog")', 'close form'); }
-  async function save(run = evaluate) { await run('document.querySelector("dialog form:not([hidden])").requestSubmit()'); }
+  async function save(run = evaluate) { await until(run, '!!document.querySelector("dialog form:not([hidden]) button[type=submit]") && !document.querySelector("dialog form:not([hidden]) button[type=submit]").matches(":disabled")', 'booking options ready'); await run('document.querySelector("dialog form:not([hidden])").requestSubmit()'); }
   async function saved() { await wait('!document.querySelector("dialog")', 'booking saved'); await ready(); }
   const future = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
   const hours = Array.from({ length: 7 }, (_, day) => ({ day, start: '09:00', end: '18:00' }));
@@ -52,6 +52,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   async function form(records, time = '10:00', run = evaluate) {
     await ready(run); await click('New appointment', 'document', run);
     await until(run, '!!document.querySelector("dialog[open]")', 'booking form');
+    await until(run, `Array.from(document.querySelectorAll('dialog form:not([hidden]) select')).length===3 && Array.from(document.querySelectorAll('dialog form:not([hidden]) select')).every(select=>select.options.length>1)`, 'initial booking choices');
     await set('dialog select:nth-of-type(1)', records.customer.id, run);
     // Selects are nested in labels; target by their order in the booking form.
     await run(`(()=>{const selects=document.querySelectorAll('dialog form:not([hidden]) select');for(const [index,value] of [[0,${JSON.stringify(records.customer.id)}],[1,${JSON.stringify(records.service.id)}],[2,${JSON.stringify(records.staff.id)}]]){Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(selects[index],value);selects[index].dispatchEvent(new Event('change',{bubbles:true}));}})()`);
@@ -126,7 +127,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   check((await api(0, 'appointments/' + walkIn.id, 'DELETE')).status === 409, 'Completed history cannot be cancelled');
   await evaluate('location.hash="customers"'); await wait('!!document.querySelector(".customer-page")', 'customer history');
   check(await evaluate('document.querySelector(".customer-card dd").textContent==="2"'), 'Derived completed visits');
-  await click('View history', 'document.querySelector("article.customer-card")'); check(await evaluate('document.querySelectorAll(".history-item").length===3'), 'Real customer history');
+  await click('View history', 'document.querySelector("article.customer-card")'); await wait('!!document.querySelector(".app-shell[data-workspace-ready=true]") && document.querySelectorAll(".history-item").length===3','remote customer history'); check(await evaluate('document.querySelectorAll(".history-item").length===3'), 'Real customer history');
   await evaluate('location.hash="dashboard"'); await wait('!!document.querySelector(".kpi")', 'dashboard');
   await wait('!!document.querySelector("[data-revenue-ready=true]")', 'collected revenue ready');
   check(await evaluate('[...document.querySelectorAll(".kpi")].find(card=>card.textContent.includes("Today\u0027s collected revenue")).querySelector(".kpi-value").textContent==="PKR 0.00"'), 'Completed unpaid bookings must not count as collected revenue');
@@ -134,7 +135,7 @@ export async function verifyAppointments({ accounts, command, evaluate, wait, ro
   await appointments(); await set('.appointment-filters select', 'Cancelled');
   await wait('document.querySelectorAll(".appointment").length===1', 'status filter');
   await set('.appointment-filters input[type=date]', future);
-  await set('.appointment-filters label:nth-of-type(4) select', a.staff.id);
+  await set('.appointment-filters label:nth-of-type(5) select', a.staff.id);
   const filtered = await api(0, `appointments?date=${future}&status=cancelled&staff_id=${a.staff.id}`);
   check(filtered.data.total === 1 && await evaluate('document.querySelector(".filter-summary").textContent.includes("Showing 1 of")'), 'Business date/status filtering');
   await click('Clear filters');
@@ -191,4 +192,6 @@ finally:e.dispose()
   check((await api(0, 'appointments')).data.total === 25, 'Server records survive page refresh');
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile appointment layout');
+  check(!traffic.some(item=>item.method==='GET'&&item.path.endsWith('/payment-summary')),'Appointment list uses batched balances without per-row requests');
+
 }

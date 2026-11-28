@@ -686,3 +686,33 @@ security regression suite verifies proxy spoofing, IP normalization, concurrent
 limits, capacity/expiry, HTTPS/hosts/CORS/headers, token claims, body limits and
 startup/exception redaction. Run all tests with the existing DB opt-in, and keep
 credentials private throughout verification.
+
+## Bounded workspace and performance
+
+`GET /api/workspace` uses the authenticated business and accepts `view` (dashboard,
+customers, staff, services, appointments, analytics or audit), `page`, `q`, `status`,
+`category`, `day`, `staff_id`, `customer_id`, and `history_page`. Unknown parameters
+are rejected. Directory/appointment/history pages contain at most 20 rows;
+dashboard upcoming bookings contain at most five. SQL counts and sums cover all
+matching tenant records, not just returned rows. Customer visits/last completed
+visit, staff daily/upcoming counts, booking display names and payment balances
+are computed server-side. Payment balances are batched for each bounded page.
+Financial history/analytics remain owner-only; necessary balances remain available
+to staff. No client-supplied business identity is accepted.
+
+`GET /api/booking-options/{customers|staff|services}` accepts `q` and `offset`,
+returning 20 safe records plus total/offset/limit. Search covers the whole tenant,
+not just the current page. Individual lookups remain tenant-scoped. Workspace page
+bounds are 0-5,000; legacy list/options offsets are bounded at 100,000. Refine
+filters for deeper results; cursor pagination remains future work.
+
+Migration `795150f8a1a2` (parent `1deb66be8c11`) adds only four indexes: tenant-first
+customer/staff/service ordering and payment timestamp aggregation with amount and
+method included. Existing indexes/constraints are preserved. Reporting uses shared
+business locks so readers coexist; these still exclude existing financial/booking
+writers and preserve coherent snapshots at READ COMMITTED. Mutation locks and
+atomic audit writes are unchanged. Pool caps remain 5+5 per process; worker counts
+must fit the PostgreSQL connection budget.
+
+See [performance measurements](../docs/performance.md) for reproducible isolated
+load tests, measured tradeoffs and deployment limitations.

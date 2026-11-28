@@ -1,5 +1,5 @@
 import type { Appointment } from './data';
-export type Service = { id: string; name: string; category: string; description: string; minutes: number; price: number; active: boolean };
+export type Service = { upcomingCount?:number; id: string; name: string; category: string; description: string; minutes: number; price: number; active: boolean };
 export type ServiceInput = Omit<Service, 'id'>;
 export const normalizeServiceName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 export function validateService(input: ServiceInput, services: Service[], excludeId?: string): string | null {

@@ -2,7 +2,7 @@ import { normalizePhone } from './customers';
 import type { Appointment } from './data';
 export const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export type WorkingDay = { day: number; start: string; end: string };
-export type Staff = { id: string; name: string; phone: string; specialty: string; active: boolean; hours: WorkingDay[] | null };
+export type Staff = { id: string; name: string; phone: string; specialty: string; active: boolean; hours: WorkingDay[] | null; todayCount?: number; upcomingCount?:number };
 export type StaffInput = Omit<Staff, 'id'>;
 export function validateStaff(input: StaffInput, staff: Staff[], excludeId?: string): string | null {
   if (!input.name.trim()) return 'Enter an employee name.';

@@ -6,12 +6,16 @@ import { bookingService } from './services';
 import type { TenantDTO } from './catalog';
 
 export type AppointmentStatus = 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
-export type AppointmentDTO = TenantDTO & { customer_id: string; staff_id: string; service_id: string; starts_at: string; ends_at: string; status: AppointmentStatus; booking_type: 'scheduled' | 'walk_in'; booked_price: string; booked_duration_minutes: number };
+export type AppointmentDTO = TenantDTO & { customer_id: string; staff_id: string; service_id: string; starts_at: string; ends_at: string; status: AppointmentStatus; booking_type: 'scheduled' | 'walk_in'; booked_price: string; booked_duration_minutes: number; customer_name?: string; staff_name?: string; service_name?: string; payment_summary?: import('./paymentLedger').PaymentSummary };
 export type BookingRecords = { customers: Customer[]; staff: Staff[]; services: Service[]; appointments: Appointment[] };
 export const statusLabels: Record<AppointmentStatus, Appointment['status']> = { confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
 
+const dateFormatters=new Map<string,Intl.DateTimeFormat>();
 export function localDateTime(value: string | number, zone: string): { date: string; time: string } {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, calendar: 'gregory', numberingSystem: 'latn', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value));
+  if(dateFormatters.size>8)dateFormatters.clear();
+  const formatter=dateFormatters.get(zone)??new Intl.DateTimeFormat('en-CA', { timeZone: zone, calendar: 'gregory', numberingSystem: 'latn', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  dateFormatters.set(zone,formatter);
+  const parts=formatter.formatToParts(new Date(value));
   const part = (name: string) => parts.find(item => item.type === name)!.value;
   return { date: `${part('year').padStart(4, '0')}-${part('month')}-${part('day')}`, time: `${part('hour')}:${part('minute')}` };
 }
@@ -34,9 +38,9 @@ export function wallTimeToUTC(date: string, time: string, zone: string): string 
 }
 
 export function appointmentFromAPI(item: AppointmentDTO, records: Pick<BookingRecords, 'customers' | 'staff' | 'services'>, zone: string): Appointment {
-  const customer = records.customers.find(record => record.id === item.customer_id);
-  const staff = records.staff.find(record => record.id === item.staff_id);
-  const service = records.services.find(record => record.id === item.service_id);
+  const customer = records.customers.find(record => record.id === item.customer_id) ?? (item.customer_name ? { id: item.customer_id, name: item.customer_name } : undefined);
+  const staff = records.staff.find(record => record.id === item.staff_id) ?? (item.staff_name ? { id:item.staff_id, name:item.staff_name } : undefined);
+  const service = records.services.find(record => record.id === item.service_id) ?? (item.service_name ? { id:item.service_id, name:item.service_name } : undefined);
   if (!customer || !staff || !service) throw new Error('Booking references changed while loading. Refresh the business records.');
   const start = Date.parse(item.starts_at), end = Date.parse(item.ends_at), price = Number(item.booked_price);
   if (!Number.isFinite(start) || !Number.isFinite(end) || !statusLabels[item.status] || !['scheduled', 'walk_in'].includes(item.booking_type)
@@ -45,7 +49,7 @@ export function appointmentFromAPI(item: AppointmentDTO, records: Pick<BookingRe
   return { id: item.id, customerId: customer.id, customer: customer.name, initials: customer.name.split(/\s+/).map(part => part[0]).join(''),
     staffId: staff.id, staff: staff.name, serviceId: service.id, service: service.name, ...localDateTime(item.starts_at, zone),
     startUTC: item.starts_at, endUTC: item.ends_at, timeZone: zone, minutes: item.booked_duration_minutes, price,
-    status: statusLabels[item.status], bookingType: item.booking_type === 'walk_in' ? 'Walk-in' : 'Scheduled' };
+    paymentSummary: item.payment_summary, status: statusLabels[item.status], bookingType: item.booking_type === 'walk_in' ? 'Walk-in' : 'Scheduled' };
 }
 
 export function bookingPayload(input: BookingInput, zone: string, original?: Appointment): Record<string, unknown> | null {

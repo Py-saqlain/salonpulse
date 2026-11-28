@@ -37,7 +37,7 @@ def verify_http(isolated):
     assert url.host in ('127.0.0.1', 'localhost', '::1')
     engine = isolated.engine
     with engine.connect() as connection:
-        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '1deb66be8c11'
+        assert connection.scalar(text('SELECT version_num FROM alembic_version')) == '795150f8a1a2'
         baseline = {name: set(connection.scalars(select(table.c.id))) for name, table in Base.metadata.tables.items()}
     marker = '__payment_http__' + uuid4().hex
     accounts = [dict(business_name=marker + str(i), full_name='Payment HTTP owner',

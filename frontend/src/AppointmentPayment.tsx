@@ -29,12 +29,13 @@ export function AppointmentPayment({ appointment, disabled }: { appointment: App
   const [open, setOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    const abort = new AbortController(); setSummary(null); setError('');
+    const abort = new AbortController(); setSummary(appointment.paymentSummary ?? null); setError('');
+    if (appointment.paymentSummary && revision===0) return () => abort.abort();
     void ledger.balance(appointment.id, abort.signal).then(value => { if (!abort.signal.aborted) setSummary(value); })
       .catch(reason => { if (!abort.signal.aborted) setError(failure(reason)); });
     return () => abort.abort();
   }, [ledger, appointment, revision]);
-  useEffect(() => ledger.subscribe(id => { if (id === appointment.id) setRevision(n => n + 1); }), [ledger, appointment.id]);
+  useEffect(() => ledger.subscribe(id => { if (id === appointment.id && !open) setRevision(n => n + 1); }), [ledger, appointment.id, open]);
   return <div className="appointment-payment" data-payment-appointment={appointment.id}>
     <div className="payment-row-details">{summary ? <><span className={`payment-status payment-${summary.state}`}>{paymentLabels[summary.state]}</span><span>Paid <strong>{paymentMoney(summary.total_paid)}</strong></span><span>Outstanding <strong>{paymentMoney(summary.balance_due)}</strong></span></> : <span role="status">{error ? 'Payment balance unavailable' : 'Loading payment balance...'}</span>}</div>
     <div className="payment-row-actions">{summary && summary.state !== 'paid' && appointment.status !== 'Cancelled' && <button className="filter-reset record-payment" disabled={disabled} onClick={() => setOpen(true)}><Banknote size={16} aria-hidden="true" />Record payment</button>}
@@ -88,7 +89,7 @@ function PaymentDialog({ appointment, disabled, onClose, onSummary }: { appointm
     sending.current = true; setPending(true); setError('');
     try {
       const value = await operation();
-      if (alive.current) { setRecovery(value); setPage(0); setReload(n => n + 1); }
+      if (alive.current) { setReady(false);setLoading(true);setRecovery(value); setPage(0); setReload(n => n + 1); }
     } catch (reason) {
       if (alive.current) { setError(failure(reason)); setReady(false); setReload(n => n + 1); }
     } finally { sending.current = false; if (alive.current) setPending(false); }

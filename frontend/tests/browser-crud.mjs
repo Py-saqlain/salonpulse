@@ -20,9 +20,9 @@ export async function verifyCrud({ accounts, command, evaluate, wait, route, sub
   }
   async function list(resource) { const result = await api(0, resource + '?limit=100'); check(result.status === 200, 'Read saved directory'); return result.data.items; }
   async function saved(resource, name) { const record = (await list(resource)).find(item => item.name === name); check(!!record, 'Saved record missing'); return record; }
-  async function ready() { await wait('document.querySelector(".directory-toolbar button")?.disabled===false && !!document.querySelector(".app-shell")', 'directory load'); }
-  async function navigate(page) { await evaluate(`location.hash=${JSON.stringify(page)}`); await ready(); await wait(`document.querySelector('main h1')?.textContent===${JSON.stringify(page[0].toUpperCase() + page.slice(1))}`, 'directory navigation'); }
-  async function click(text, within = 'document') { await evaluate(`([...${within}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(text)})).click()`); }
+  async function ready() { await wait('document.querySelector(".directory-toolbar button")?.disabled===false && !!document.querySelector(".app-shell[data-workspace-ready=true]")', 'directory load'); }
+  async function navigate(page) { await evaluate(`location.hash=${JSON.stringify(page)}`); await wait(`document.querySelector('main h1')?.textContent===${JSON.stringify(page[0].toUpperCase() + page.slice(1))}`, 'directory navigation'); await ready(); }
+  async function click(text, within = 'document') { await wait(`!![...(${within}?.querySelectorAll('button')??[])].find(button=>button.textContent.trim()===${JSON.stringify(text)} && !button.matches(':disabled'))`,'ready action '+text); await evaluate(`([...${within}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(text)})).click()`); }
   async function set(selector, value) {
     await evaluate(`(() => { const input=document.querySelector(${JSON.stringify(selector)}); const prototype=input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype,'value').set.call(input,${JSON.stringify(value)}); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   }
@@ -177,11 +177,12 @@ finally: engine.dispose()
   // Focus must still revalidate once no editor owns a draft.
   const focusRequests = calls.length;
   await evaluate('window.dispatchEvent(new Event("focus"))');
-  await wait('document.querySelector(".directory-toolbar button")?.disabled===false', 'focus refresh without editor');
+  const focusDeadline=Date.now()+5000;while(calls.length===focusRequests&&Date.now()<focusDeadline)await new Promise(resolve=>setTimeout(resolve,20));
+  await ready();
   check(calls.length > focusRequests, 'Focus refresh retained outside editors');
   check(await evaluate('document.querySelectorAll("article.customer-card").length===20'), 'First page size');
   await click('Next', 'document.querySelector(".directory-pagination")'); check(await evaluate('document.querySelector(".directory-pagination").textContent.includes("Page 2 of 2")'), 'Next page');
-  await set('.customer-search input', 'Customer A'); await wait(`!!(${card('Customer A')})`, 'global search'); check(await evaluate('document.querySelectorAll("article.customer-card").length===1'), 'Search across pages');
+  await set('.customer-search input', 'Customer A'); await wait(`!!document.querySelector('.app-shell[data-workspace-ready=true]') && !!(${card('Customer A')}) && document.querySelectorAll('article.customer-card').length===1`, 'global search'); check(await evaluate('document.querySelectorAll("article.customer-card").length===1'), 'Search across pages');
 
   // Logout during a delayed refresh: its responses must not hydrate the next account.
   await command('Network.emulateNetworkConditions', { offline: false, latency: 200, downloadThroughput: -1, uploadThroughput: -1 });
@@ -207,13 +208,13 @@ finally: engine.dispose()
   check(await evaluate('document.querySelector("main [role=alert]").textContent.includes("Cannot reach")'), 'Prior failure stays visible while retrying');
   await ready(); await see('Customer B');
   const reloads = traffic.slice(beforeRetry).filter(item => item.method === 'GET');
-  for (const path of ['/api/customers', '/api/staff', '/api/services', '/api/appointments']) check(reloads.filter(item => item.path === path).length === 1, 'Retry requests are coalesced: ' + path);
+  for (const path of ['/api/workspace']) check(reloads.filter(item => item.path === path).length === 1, 'Retry requests are coalesced: ' + path);
   check(await evaluate(editorSnapshot) === recoveryDraft, 'Successful retry preserved draft and inline feedback');
   check(await evaluate('![...document.querySelectorAll("main > [role=alert]")].some(item=>item.textContent.includes("Cannot reach"))'), 'Successful retry cleared load failure');
   await command('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await click('Cancel', 'document.querySelector(".customer-editor")');
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile directory overflow');
-  check(calls.some(path => path === '/api/appointments'), 'Appointment history was not loaded');
+  check(calls.some(path => path === '/api/workspace'), 'Appointment history was not loaded');
   check(dialogs >= 8, 'Confirmation dialogs were not exercised');
 }

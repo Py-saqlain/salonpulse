@@ -6,7 +6,7 @@ from app.models import Appointment, AppointmentStatus, AuditLog, Payment, Paymen
 from app.services.analytics import money
 
 def reconcile_finances(session, scope):
-    business = lock_business(session, scope)
+    business = lock_business(session, scope, shared=True)
     now = datetime.now(timezone.utc)
     receipts = select(Payment.appointment_id,func.sum(Payment.amount).label('paid')).where(
         Payment.business_id == scope.business_id).group_by(Payment.appointment_id).subquery()

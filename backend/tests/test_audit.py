@@ -30,7 +30,7 @@ class AuditMetadataTests(unittest.TestCase):
     def test_additive_migration_contains_statement_level_immutability(self):
         scripts=ScriptDirectory.from_config(Config(str(Path(__file__).resolve().parents[1]/'alembic.ini')))
         revision=scripts.get_revision('1deb66be8c11')
-        self.assertEqual(revision.down_revision,'894cc829413f');self.assertEqual(scripts.get_heads(),['1deb66be8c11'])
+        self.assertEqual(revision.down_revision,'894cc829413f');self.assertEqual(scripts.get_heads(),['795150f8a1a2'])
         statements=[]
         engine=create_mock_engine('postgresql+psycopg://',lambda sql,*a,**kw:statements.append(sql))
         with Operations.context(MigrationContext.configure(connection=engine)):revision.module.upgrade()

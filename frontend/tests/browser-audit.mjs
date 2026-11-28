@@ -11,7 +11,7 @@ export async function verifyAudit({accounts,command,evaluate,wait,route,submit,l
   return {status:r.status,data:r.status===204?null:await r.json()};
  }
  async function post(i,path,body){const r=await api(i,path,'POST',body);check(r.status===201,'Audit fixture create: '+path);return r.data;}
- async function ready(){await wait('!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false','audit workspace');}
+ async function ready(){await wait('!!document.querySelector(".app-shell[data-workspace-ready=true]") && document.querySelector(".directory-toolbar button")?.disabled===false','audit workspace');}
  async function open(){await evaluate('location.hash="audit"');await wait('document.querySelector("[data-audit-ready=true]") && document.querySelector("[data-reconciliation-ready=true]")','audit data');}
  async function click(text,scope='document'){await evaluate(`([...${scope}.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)} && !b.disabled)).click()`);}
  async function select(action){await evaluate(`(()=>{const e=document.querySelector('[aria-label="Audit action"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(e,${JSON.stringify(action)});e.dispatchEvent(new Event('change',{bubbles:true}));})()`);await wait('!!document.querySelector("[data-audit-ready=true]")','filtered audit');}

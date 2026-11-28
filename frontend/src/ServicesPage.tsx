@@ -1,3 +1,5 @@
+import type {Remote} from './workspace';
+import {useEffect} from 'react';
 import { Pagination, usePagination } from './Pagination';
 import './services.css';
 import { useState } from 'react';
@@ -13,7 +15,7 @@ function ServiceEditor({ service, onSave, onClose, appointments }: { service?: S
   const [price, setPrice] = useState(service ? String(service.price) : '');
   const [error, setError] = useState('');
   const [pendingSave, setPendingSave] = useState(false);
-  const pending = service ? upcomingServiceBookings(service.id, appointments).length : 0;
+  const pending = service?.upcomingCount ?? (service ? upcomingServiceBookings(service.id, appointments).length : 0);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!minutes.trim() || !price.trim()) { setError('Enter a duration and price. Use 0 for a free service.'); return; }
@@ -33,22 +35,24 @@ function ServiceEditor({ service, onSave, onClose, appointments }: { service?: S
     {error && <p className="booking-error" role="alert">{error}</p>}<div className="booking-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button">{pendingSave ? 'Saving...' : 'Save service'}</button></div>
   </fieldset></form>;
 }
-export function ServicesPage({ services, appointments, onSave, onDelete, owner, disabled }: { onDelete: (id: string) => Promise<string | null>; owner: boolean; disabled: boolean; services: Service[]; appointments: Appointment[]; onSave: SaveService }) {
+export function ServicesPage({ remote, services, appointments, onSave, onDelete, owner, disabled }: { remote?:Remote; onDelete: (id: string) => Promise<string | null>; owner: boolean; disabled: boolean; services: Service[]; appointments: Appointment[]; onSave: SaveService }) {
   const [error, setError] = useState('');
   const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [category, setCategory] = useState('');
   const [editor, setEditor] = useState<{ service?: Service } | null>(null);
   const categories = [...new Set(services.map(service => service.category).filter(Boolean))].sort();
   const filtered = services.filter(service => `${service.name} ${service.category} ${service.description}`.toLowerCase().includes(query.trim().toLowerCase()) && (!status || service.active === (status === 'active')) && (!category || (category === 'uncategorized' ? !service.category : `category:${service.category}` === category)));
-  const pagination = usePagination(filtered, query + '\0' + status + '\0' + category);
+  const localPagination = usePagination(filtered, query + '\0' + status + '\0' + category);
+  const pagination=remote?{...remote,visible:services}:localPagination;
+  useEffect(()=>{if(remote)remote.filter({q:query,status,category});},[query,status,category]);
   async function remove(id: string) { setError(await onDelete(id) ?? ''); }
-  return <section><div className="customer-toolbar panel-heading"><div><h2>Your service menu</h2><p>{services.length} services | Saved business catalog</p></div>{owner && <button disabled={disabled} className="primary-button" onClick={() => setEditor({})}>Add service</button>}</div>
+  return <section><div className="customer-toolbar panel-heading"><div><h2>Your service menu</h2><p>{remote?.total ?? services.length} services | Saved business catalog</p></div>{owner && <button disabled={disabled} className="primary-button" onClick={() => setEditor({})}>Add service</button>}</div>
     {!owner && <p className="field-help">Read-only catalog. Only the business owner can make changes.</p>}
     {error && <p role="alert" className="booking-error">{error}</p>}
     {editor && owner && <section className="panel customer-edit-panel"><ServiceEditor key={editor.service?.id ?? 'new'} service={editor.service} onSave={onSave} onClose={() => setEditor(null)} appointments={appointments} /></section>}
-    <div className="service-filters"><label className="customer-search">Search services<input type="search" placeholder="Name, category or description" value={query} onChange={e => setQuery(e.target.value)} /></label><label className="customer-search">Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label><label className="customer-search">Category<select value={category} onChange={e => setCategory(e.target.value)}><option value="">All categories</option><option value="uncategorized">Uncategorized</option>{categories.map(name => <option key={name} value={`category:${name}`}>{name}</option>)}</select></label></div>
-    <p className="filter-summary" role="status">{filtered.length} matching services</p>
+    <div className="service-filters"><label className="customer-search">Search services<input type="search" placeholder="Name, category or description" value={query} onChange={e => setQuery(e.target.value)} /></label><label className="customer-search">Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label><label className="customer-search">Category<input list="service-category-options" value={category} placeholder="Category or uncategorized" onChange={e=>setCategory(e.target.value)} /><datalist id="service-category-options">{categories.map(name=><option key={name} value={name} />)}<option value="uncategorized" /></datalist></label></div>
+    <p className="filter-summary" role="status">{remote?.total ?? filtered.length} matching services</p>
     <div className="staff-grid">{pagination.visible.map(service => <article className="panel customer-card" key={service.id}><div className="staff-card-heading"><h3>{service.name}</h3><span className={`status ${service.active ? 'status-completed' : 'status-cancelled'}`}>{service.active ? 'Active' : 'Inactive'}</span></div><p>{service.category || 'Uncategorized'}</p><dl><div><dt>Duration</dt><dd>{service.minutes} minutes</dd></div><div><dt>Current price</dt><dd>{formatPKR(service.price)}</dd></div></dl>{service.description && <p className="service-description">{service.description}</p>}<div className="appointment-actions">{owner && <><button disabled={disabled} onClick={() => setEditor({ service })}>Edit service</button><button disabled={disabled} className="cancel-booking" onClick={() => void remove(service.id)}>Delete service</button></>}</div></article>)}</div>
-    {!filtered.length && <div className="panel empty-appointments"><h3>{services.length ? 'No matching services' : 'Build your service menu'}</h3><p>{services.length ? 'Adjust search, status or category to find a service.' : 'Add a service to begin taking bookings.'}</p>{!!services.length && <button className="filter-reset" onClick={() => { setQuery(''); setStatus(''); setCategory(''); }}>Clear filters</button>}</div>}
+    {!(remote?.total ?? filtered.length) && <div className="panel empty-appointments"><h3>{services.length ? 'No matching services' : 'Build your service menu'}</h3><p>{services.length ? 'Adjust search, status or category to find a service.' : 'Add a service to begin taking bookings.'}</p>{!!services.length && <button className="filter-reset" onClick={() => { setQuery(''); setStatus(''); setCategory(''); }}>Clear filters</button>}</div>}
     <Pagination {...pagination} />
   </section>;
 }

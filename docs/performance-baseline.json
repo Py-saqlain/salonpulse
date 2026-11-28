@@ -1,0 +1,41 @@
+{
+  "seed": {
+    "customers": 5000,
+    "staff": 100,
+    "services": 100,
+    "appointments": 20000,
+    "payments": 12000
+  },
+  "endpoint_timings": {
+    "/api/customers": {
+      "median_ms": 43.07,
+      "max_ms": 279.21
+    },
+    "/api/appointments": {
+      "median_ms": 46.33,
+      "max_ms": 119.03
+    },
+    "/api/analytics/revenue": {
+      "median_ms": 116.75,
+      "max_ms": 243.85
+    },
+    "/api/finance/reconciliation": {
+      "median_ms": 296.84,
+      "max_ms": 312.48
+    }
+  },
+  "legacy_full_catalog": {
+    "requests": 252,
+    "records": 25200,
+    "bytes": 11796638,
+    "elapsed_ms": 25609.65
+  },
+  "load": {
+    "concurrency": 10,
+    "requests": 100,
+    "errors": 0,
+    "p50_ms": 558.13,
+    "p95_ms": 1501.74,
+    "elapsed_ms": 7368.67
+  }
+}

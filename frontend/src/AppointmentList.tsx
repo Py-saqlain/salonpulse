@@ -1,9 +1,18 @@
+import {useEffect,useState} from 'react';
 import type { Appointment } from './data';
 import { formatPKR, formatTime, startsAt } from './data';
 import { AppointmentPayment } from './AppointmentPayment';
 
 export type AppointmentActions = { onEdit?: (item: Appointment) => void; onStatus?: (item: Appointment, status: 'In progress' | 'Completed' | 'Cancelled') => void; disabled?: boolean };
 export function AppointmentList({ appointments, showDates = false, showPayments = false, onEdit, onStatus, disabled }: AppointmentActions & { appointments: Appointment[]; showDates?: boolean; showPayments?: boolean }) {
+  const [clock,setClock]=useState(0);
+  useEffect(()=>{
+    if(!onStatus)return;
+    const next=Math.min(...appointments.filter(a=>a.status==='Confirmed'&&startsAt(a)>Date.now()).map(startsAt));
+    if(!Number.isFinite(next))return;
+    const timer=window.setTimeout(()=>setClock(n=>n+1),Math.min(next-Date.now()+20,2147483647));
+    return()=>window.clearTimeout(timer);
+  },[appointments,clock,!!onStatus]);
   if (!appointments.length) return <p className="empty-appointments">No appointments yet. Create a booking to get started.</p>;
   return <div className="appointment-list">{appointments.map(item => <article className="appointment" key={item.id} data-appointment-id={item.id}>
     <div className="appointment-time"><strong>{formatTime(item)}</strong>{showDates && <span>{item.date}</span>}<span>{item.minutes} min</span></div>

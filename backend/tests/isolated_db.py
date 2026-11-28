@@ -35,7 +35,7 @@ def verify_schema(connection,name):
 
 def test_engine(name):
     assert re.fullmatch(PATTERN,name)
-    engine=create_engine(guarded_url(),hide_parameters=True,isolation_level='READ COMMITTED',
+    engine=create_engine(guarded_url(),hide_parameters=True,isolation_level='READ COMMITTED',pool_size=5,max_overflow=5,pool_timeout=5,pool_recycle=1800,pool_pre_ping=True,
         connect_args={'connect_timeout':5,'options':f'-c search_path={name} -c statement_timeout=10000 -c lock_timeout=5000'})
     with engine.connect() as c:
         verify_schema(c,name)

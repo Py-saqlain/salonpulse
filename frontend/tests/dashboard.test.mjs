@@ -48,7 +48,7 @@ test('empty businesses and midnight rollover have independent zero totals', () =
   assert.equal(dashboardStats(rows, staff, 'Asia/Karachi', Date.parse('2030-01-02T19:00:00Z')).total, 0);
 });
 
-test('all API pages contribute to statistics and workload before display pagination', async () => {
+test('large legacy catalogs require server aggregation rather than full browser downloads', async () => {
   const business = '11111111-1111-4111-8111-111111111111', id = index => `22222222-2222-4222-8222-${String(index).padStart(12, '0')}`;
   const requests = [];
   const api = { request: async path => {
@@ -61,8 +61,6 @@ test('all API pages contribute to statistics and workload before display paginat
     } else { total = 1; items = [resource === 'customers' ? { ...base, phone: null, notes: null } : resource === 'staff' ? { ...base, phone: null, specialty: null, active: true, hours: null } : { ...base, category: null, description: '', duration_minutes: 30, price: '100.00', active: true }]; }
     return { items, total, offset, limit: 100 };
   } };
-  const records = await readCatalog(api, business, new AbortController().signal, 'Asia/Karachi');
-  const result = dashboardStats(records.appointments, records.staff, 'Asia/Karachi', now);
-  assert.equal(result.total, 205); assert.equal(result.active, 204); assert.equal(result.upcoming.length, 204); assert.equal(result.workload[0].minutes, 6120);
-  assert.deepEqual(requests.filter(item => item[0] === 'appointments').map(item => item[1]), [0, 100, 200]);
+  await assert.rejects(readCatalog(api,business,new AbortController().signal,'Asia/Karachi'),/paginated workspace/);
+  assert.deepEqual(requests.filter(item=>item[0]==='appointments').map(item=>item[1]),[0]);
 });

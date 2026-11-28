@@ -1,20 +1,22 @@
-import { Dashboard } from './Dashboard';
-import { AppointmentsPage } from './AppointmentsPage';
+import {ScreenBoundary} from './ScreenBoundary';
+const Dashboard=lazy(()=>import('./Dashboard').then(module=>({default:module.Dashboard})));
+const AppointmentsPage=lazy(()=>import('./AppointmentsPage').then(module=>({default:module.AppointmentsPage})));
 import { AuthProvider, useAuth } from './AuthContext';
 import { AuthPage } from './AuthPage';
 import { PaymentProvider } from './PaymentContext';
 import { useRevenueAnalytics } from './useRevenueAnalytics';
-import { AuditPage } from './AuditPage';
-import { RevenuePanel } from './RevenuePanel';
+const AuditPage=lazy(()=>import('./AuditPage').then(module=>({default:module.AuditPage})));
+const RevenuePanel=lazy(()=>import('./RevenuePanel').then(module=>({default:module.RevenuePanel})));
 import { useCatalog } from './useCatalog';
-import { ServicesPage } from './ServicesPage';
-import { StaffPage } from './StaffPage';
-import { CustomersPage } from './CustomersPage';
-import { StrictMode, useEffect, useState } from 'react';
+const ServicesPage=lazy(()=>import('./ServicesPage').then(module=>({default:module.ServicesPage})));
+const StaffPage=lazy(()=>import('./StaffPage').then(module=>({default:module.StaffPage})));
+const CustomersPage=lazy(()=>import('./CustomersPage').then(module=>({default:module.CustomersPage})));
+import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LayoutDashboard, CalendarDays, Users, UserRound, Scissors, ChartNoAxesCombined, Plus, Menu, X, Sparkles, MapPin, ChevronRight, Leaf } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { AppointmentForm } from './AppointmentForm';
+const AppointmentForm=lazy(()=>import('./AppointmentForm').then(module=>({default:module.AppointmentForm})));
+import {localDateTime} from './appointments';
 import type { Page, Appointment, BookingInput } from './data';
 import './styles.css';
 
@@ -36,15 +38,20 @@ function Icon({ icon: IconComponent, size = 20 }: { icon: LucideIcon; size?: num
 }
 function App() {
   const { session, logout } = useAuth();
-  const catalog = useCatalog();
+  const [page,setPage]=useState<Page>(currentPage);
+  const catalog = useCatalog(page);
   const { customers, staff, services, saveCustomer } = catalog;
   const appointments = catalog.appointments;
   const [actionError, setActionError] = useState('');
   const [editing, setEditing] = useState<Appointment | undefined>();
   const [formOpen, setFormOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const analytics = useRevenueAnalytics(appointments, catalog.ready, catalog.loading, now);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const analytics = useRevenueAnalytics(appointments, catalog.ready && ['dashboard','analytics'].includes(page), catalog.loading && ['dashboard','analytics'].includes(page), now);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
+  const localDay=localDateTime(now,session!.business.timezone).date;
+  useEffect(()=>{void catalog.refresh();},[localDay]);
+  const nextStart=page==='dashboard'?catalog.stats?.upcoming[0]?.startUTC:undefined;
+  useEffect(()=>{if(!nextStart)return;const delay=Date.parse(nextStart)-Date.now()+20;if(delay<0)return;const timer=window.setTimeout(()=>void catalog.refresh(),Math.min(delay,2147483647));return()=>window.clearTimeout(timer);},[nextStart]);
   async function saveBooking(input: BookingInput): Promise<string | null> {
     const error = await catalog.saveAppointment(input, editing);
     if (!error) { setFormOpen(false); setEditing(undefined); }
@@ -56,7 +63,6 @@ function App() {
     const error = await catalog.changeAppointment(item, value);
     if (error) setActionError(error);
   }
-  const [page, setPage] = useState<Page>(currentPage);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   useEffect(() => {
@@ -79,14 +85,14 @@ function App() {
   const active = navigation.find(item => item.id === page)!;
   if (!session) return null;
   const { user, business } = session;
-  return <div className="app-shell">
+  return <div className="app-shell" data-workspace-ready={catalog.ready&&!catalog.loading}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     {menuOpen && <button className="nav-overlay" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`} id="navigation" inert={mobile && !menuOpen}>
       <a className="brand" href="#dashboard"><span className="brand-icon"><Icon icon={Scissors} size={25} /></span>Salon<span className="brand-light">Pulse</span></a>
       <div className="workspace"><span className="workspace-icon"><Icon icon={Leaf} /></span><div><strong>{business.name}</strong><span><Icon icon={MapPin} size={13} /> {business.timezone}</span></div><span className="connected-tag">Connected</span></div>
       <p className="nav-caption">WORKSPACE</p>
-      <nav aria-label="Main navigation">{navigation.filter(item => !['analytics','audit'].includes(item.id) || user.role === 'owner').map(item => <a key={item.id} href={`#${item.id}`} onClick={() => setMenuOpen(false)} className={`nav-item ${page === item.id ? 'nav-active' : ''}`} aria-current={page === item.id ? 'page' : undefined}><Icon icon={item.icon} /><span>{item.label}</span>{item.id === 'appointments' && <span className="nav-count">{appointments.length}</span>}</a>)}</nav>
+      <nav aria-label="Main navigation">{navigation.filter(item => !['analytics','audit'].includes(item.id) || user.role === 'owner').map(item => <a key={item.id} href={`#${item.id}`} onClick={() => setMenuOpen(false)} className={`nav-item ${page === item.id ? 'nav-active' : ''}`} aria-current={page === item.id ? 'page' : undefined}><Icon icon={item.icon} /><span>{item.label}</span>{item.id === 'appointments' && <span className="nav-count">{catalog.appointmentTotal}</span>}</a>)}</nav>
       <div className="sidebar-bottom"><div className="brand-note"><Icon icon={Sparkles} /><strong>A little more flow.<br />A lot less busywork.</strong><p>Your salon, beautifully organised.</p></div><div className="owner"><span className="avatar owner-avatar" aria-hidden="true">{user.full_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2)}</span><div><strong>{user.full_name}</strong><span>{user.role === 'owner' ? 'Salon owner' : 'Team member'}</span></div></div></div>
     </aside>
     <div className="workspace-main">
@@ -97,11 +103,11 @@ function App() {
         <div className="directory-toolbar"><button className="filter-reset" disabled={catalog.loading || catalog.busy} onClick={() => void catalog.refresh()}>Refresh directories</button>{catalog.loading && <span role="status">Loading business records...</span>}{catalog.notice && !catalog.loading && <span role="status">{catalog.notice}</span>}</div>
         {catalog.error && <p className="booking-error" role="alert">{catalog.error} Previously loaded records may be out of date. Use Refresh directories to retry. A submitted change may already have been saved; refresh before submitting it again.</p>}
         {actionError && <p className="action-notice" role="alert">{actionError}</p>}
-        {page === 'dashboard' ? <Dashboard appointments={appointments} staff={staff} customerCount={customers.length} timezone={business.timezone} now={now} ready={catalog.ready} loading={catalog.loading} analytics={analytics} /> : page === 'audit' ? <AuditPage /> : page === 'analytics' ? <RevenuePanel analytics={analytics} /> : !catalog.loaded ? <section className="panel empty-appointments"><h2>{catalog.loading ? 'Loading your business records...' : 'Records unavailable'}</h2><p>{catalog.loading ? 'Please wait.' : 'Refresh the business records to try again.'}</p></section> : page === 'appointments' ? <AppointmentsPage appointments={appointments} staff={staff} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={(item, status) => void changeStatus(item, status)} /> : page === 'customers' ? <CustomersPage customers={customers} appointments={appointments} onSave={saveCustomer} onDelete={id => catalog.remove('customers', id)} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'staff' ? <StaffPage staff={staff} appointments={appointments} onSave={catalog.saveStaff} now={now} onDelete={id => catalog.remove('staff', id)} owner={catalog.owner} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'services' ? <ServicesPage services={services} appointments={appointments} onSave={catalog.saveService} onDelete={id => catalog.remove('services', id)} owner={catalog.owner} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}
+        <ScreenBoundary key={page}><Suspense fallback={<section className="panel empty-appointments" role="status">Loading screen...</section>}>{page === 'dashboard' ? <Dashboard remote={catalog.remote} stats={catalog.stats} appointments={appointments} staff={staff} customerCount={customers.length} timezone={business.timezone} now={now} ready={catalog.ready} loading={catalog.loading} analytics={analytics} /> : page === 'audit' ? <AuditPage /> : page === 'analytics' ? <RevenuePanel analytics={analytics} /> : !catalog.loaded ? <section className="panel empty-appointments"><h2>{catalog.loading ? 'Loading your business records...' : 'Records unavailable'}</h2><p>{catalog.loading ? 'Please wait.' : 'Refresh the business records to try again.'}</p></section> : page === 'appointments' ? <AppointmentsPage remote={catalog.remote} appointments={appointments} staff={staff} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} onEdit={item => { setEditing(item); setFormOpen(true); }} onStatus={(item, status) => void changeStatus(item, status)} /> : page === 'customers' ? <CustomersPage remote={catalog.remote} customers={customers} appointments={appointments} onSave={saveCustomer} onDelete={id => catalog.remove('customers', id)} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'staff' ? <StaffPage remote={catalog.remote} staff={staff} appointments={appointments} onSave={catalog.saveStaff} now={now} onDelete={id => catalog.remove('staff', id)} owner={catalog.owner} timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : page === 'services' ? <ServicesPage remote={catalog.remote} services={services} appointments={appointments} onSave={catalog.saveService} onDelete={id => catalog.remove('services', id)} owner={catalog.owner} disabled={!catalog.ready || catalog.loading || catalog.busy} /> : <section className="placeholder panel"><span className="placeholder-icon"><Icon icon={active.icon} size={32} /></span><span className="eyebrow">TAKING SHAPE</span><h2>Your {active.label.toLowerCase()}, all in one place.</h2><p>{({ customers: 'A clear view of the people who keep coming back.', staff: 'A shared space for your team and their schedules.', services: 'Your treatments, durations and prices, neatly organised.', analytics: 'Useful insights into how your salon is growing.' } as Partial<Record<Page, string>>)[page]}</p><span className="count-badge">Coming soon</span><a className="text-link" href="#dashboard">Back to dashboard</a></section>}</Suspense></ScreenBoundary>
         <footer className="page-footer"><span>SalonPulse <span aria-hidden="true">|</span> Made for the rhythm of your salon.</span><span>Connected business workspace</span></footer>
       </main>
     </div>
-    {formOpen && <AppointmentForm timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}
+    <ScreenBoundary key={String(formOpen)} onDismiss={()=>setFormOpen(false)}><Suspense fallback={<p role="status">Loading appointment form...</p>}>{formOpen && <AppointmentForm timezone={business.timezone} disabled={!catalog.ready || catalog.loading || catalog.busy} services={services} staff={staff} customers={customers} onSaveCustomer={saveCustomer} editing={editing} appointments={appointments} onSave={saveBooking} onClose={() => { setFormOpen(false); setEditing(undefined); }} />}</Suspense></ScreenBoundary>
   </div>;
 }
 function AuthGate() {

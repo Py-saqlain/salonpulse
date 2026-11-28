@@ -26,7 +26,7 @@ def money(value):
 def revenue_analytics(session, scope, day=None):
     # Shared writer lock keeps receipt aggregates and outstanding balances on a
     # consistent business state, even at READ COMMITTED isolation.
-    business = lock_business(session, scope)
+    business = lock_business(session, scope, shared=True)
     try:
         zone = ZoneInfo(business.timezone)
         day = day or datetime.now(timezone.utc).astimezone(zone).date()

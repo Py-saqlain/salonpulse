@@ -1,5 +1,5 @@
 import type { Appointment } from './data';
-export type Customer = { id: string; name: string; phone: string; notes: string };
+export type Customer = { id: string; name: string; phone: string; notes: string; completedVisits?: number; lastCompleted?: string | null };
 export type CustomerInput = Pick<Customer, 'name' | 'phone' | 'notes'>;
 export function normalizePhone(phone: string): string | null {
   if (!phone.trim()) return '';

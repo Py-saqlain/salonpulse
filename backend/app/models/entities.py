@@ -318,3 +318,9 @@ class PaymentIntent(TenantRecord, Base):
     request_fingerprint: Mapped[str | None] = mapped_column(String(64))
     receipt_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+# Stable tenant-first ordering serves LIMIT/OFFSET pages without sorting whole directories.
+Index('ix_customers_business_order',Customer.business_id,Customer.created_at.desc(),Customer.id)
+Index('ix_staff_business_order',Staff.business_id,Staff.created_at.desc(),Staff.id)
+Index('ix_services_business_order',Service.business_id,Service.created_at.desc(),Service.id)
+Index('ix_payments_business_paid',Payment.business_id,Payment.paid_at,postgresql_include=['amount','method'])

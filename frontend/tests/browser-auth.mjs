@@ -128,7 +128,15 @@ try {
   check(await evaluate('location.hash==="#login" && !document.querySelector(".app-shell")'), 'Protected route exposed workspace');
   await evaluate('localStorage.setItem("salonpulse.demo.v4", JSON.stringify({customers:[{name:"LEGACY PRIVATE CUSTOMER"}]}))');
 
-  if (process.argv.includes('--audit')) {
+  if (process.argv.includes('--loading')) {
+    const {verifyLoading}=await import('./browser-loading.mjs');
+    await verifyLoading({accounts,command,evaluate,wait,route,submit,login,logout,check,setInterceptor:value=>{interception=value;}});
+    check(exceptions===0,'Browser runtime exceptions');console.log(`PASS: ${checks} route-loading recovery checks.`);
+  } else if (process.argv.includes('--mobile')) {
+    const {verifyMobile}=await import('./browser-mobile.mjs');
+    await verifyMobile({accounts,command,evaluate,wait,route,submit,logout,check});
+    check(exceptions===0,'Browser runtime exceptions');console.log(`PASS: ${checks} mobile/desktop layout checks.`);
+  } else if (process.argv.includes('--audit')) {
     const { verifyAudit } = await import('./browser-audit.mjs');
     await verifyAudit({accounts,command,evaluate,wait,route,submit,logout,login,check});
     check(exceptions === 0,'Browser runtime exceptions');
@@ -215,13 +223,14 @@ try {
   const mobile = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(tmpdir(), 'salonpulse-auth-mobile.png'), Buffer.from(mobile.data, 'base64'));
   check(await evaluate('document.documentElement.scrollWidth<=innerWidth'), 'Mobile auth horizontal overflow');
-  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services','/api/appointments','/api/analytics/revenue'].includes(path)), 'Unexpected business-resource API calls');
+  check(calls.every(path => ['/api/auth/register','/api/auth/login','/api/auth/me','/api/business/me','/api/customers','/api/staff','/api/services','/api/appointments','/api/analytics/revenue','/api/workspace','/api/booking-options/customers','/api/booking-options/staff','/api/booking-options/services'].includes(path)), 'Unexpected business-resource API calls');
   check(exceptions === 0, 'Browser runtime exceptions');
   console.log(`PASS: ${checks} live browser checks; desktop/mobile, registration, login, logout, refresh, expiry, 401, network errors, duplicates and tenant/demo isolation.`);
   }
 } catch (error) {
   // Never dump browser protocol data, requests, passwords or tokens.
   console.error('FAIL:', error instanceof Error ? error.message : 'Browser verification failed'); process.exitCode = 1;
+  if(error instanceof Error)console.error('Failure location:',error.stack?.split('\n').filter(line=>line.includes('browser-')).slice(0,4).join('\n'));
   if (socket?.readyState === WebSocket.OPEN) {
     try {
       const state = await evaluate(`JSON.stringify({route:location.hash, editorOpen:!!document.querySelector('.customer-edit-panel'), alerts:[...document.querySelectorAll('main [role=alert]')].map(item=>item.textContent), statuses:[...document.querySelectorAll('article.customer-card .status')].map(item=>item.textContent), loading:document.querySelector('.directory-toolbar button')?.disabled})`);

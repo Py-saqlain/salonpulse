@@ -23,7 +23,7 @@ export async function verifyPayments({ accounts, command, evaluate, wait, route,
   async function set(selector, value) {
     await evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});const prototype=input instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   }
-  async function ready() { await wait('!!document.querySelector(".app-shell") && document.querySelector(".directory-toolbar button")?.disabled===false', 'payment workspace'); }
+  async function ready() { await wait('!!document.querySelector(".app-shell[data-workspace-ready=true]") && document.querySelector(".directory-toolbar button")?.disabled===false', 'payment workspace'); }
   async function refresh() { await click('Refresh directories'); await ready(); }
   async function appointments() { await evaluate('location.hash="appointments"'); await ready(); await wait('!!document.querySelector(".appointments-page")', 'payment appointment page'); }
   const row = id => `document.querySelector('[data-payment-appointment="${id}"]')`;

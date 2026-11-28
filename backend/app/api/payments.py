@@ -30,7 +30,7 @@ def record(appointment_id: UUID, data: PaymentCreate, response: Response, scope:
 @router.get('/api/appointments/{appointment_id}/payments', response_model=PaymentHistory)
 def history(appointment_id: UUID, scope: OwnerScope, session: DatabaseSession,
             limit: Annotated[int, Query(ge=1, le=100)] = 20,
-            offset: Annotated[int, Query(ge=0)] = 0):
+            offset: Annotated[int, Query(ge=0, le=100000)] = 0):
     return payment_history(session, scope, appointment_id, limit, offset)
 
 

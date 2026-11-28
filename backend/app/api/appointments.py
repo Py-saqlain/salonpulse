@@ -27,7 +27,7 @@ def create(data: AppointmentCreate, scope: Scope, session: DatabaseSession):
 @router.get("", response_model=Page[AppointmentResponse])
 def list_bookings(scope: Scope, session: DatabaseSession,
                   limit: Annotated[int, Query(ge=1, le=100)] = 20,
-                  offset: Annotated[int, Query(ge=0)] = 0,
+                  offset: Annotated[int, Query(ge=0, le=100000)] = 0,
                   day: Annotated[date | None, Query(alias="date")] = None,
                   staff_id: UUID | None = None, status: AppointmentStatus | None = None):
     return list_appointments(session, scope, limit, offset, day, staff_id, status)

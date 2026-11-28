@@ -63,7 +63,7 @@ class PaymentModelTests(unittest.TestCase):
         scripts = ScriptDirectory.from_config(Config(str(backend / 'alembic.ini')))
         revision = scripts.get_revision('e11993c1b0a3')
         self.assertEqual(revision.down_revision, '4eaceb800869')
-        self.assertEqual(scripts.get_heads(), ["1deb66be8c11"])
+        self.assertEqual(scripts.get_heads(), ["795150f8a1a2"])
         statements = []
         engine = create_mock_engine('postgresql+psycopg://', lambda sql, *a, **kw: statements.append(sql))
         with Operations.context(MigrationContext.configure(connection=engine, opts={"target_metadata": Base.metadata})):

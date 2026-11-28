@@ -53,15 +53,21 @@ late responses from earlier sessions from restoring a logged-out account.
 
 ## Business directories and session isolation
 
-The shared `useCatalog` hook loads `/api/customers`, `/api/staff`, `/api/services`
-and `/api/appointments`
-using server UUIDs and tenant-checked response records. It follows all backend
-100-record pages; screens search/filter the complete loaded directory and display
-20 records per UI page. This preserves global search and complete appointment
-selectors until server-side search is available. Loading all records is a prototype
-scaling limitation; large directories need backend search and cursor pagination.
-If pagination changes mid-load, the UI requests a refresh rather than merging an
-inconsistent list. Refresh and window focus reload data; no background polling.
+The shared `useCatalog` hook loads one bounded `/api/workspace?view=...` response
+for the current screen. PostgreSQL applies search, filters and pagination (20
+records/page); the browser never downloads the entire business. Customer history
+is separately paginated and visit totals are computed across all completed
+appointments. Dashboard counters and staff workload are SQL aggregates, with
+only five upcoming bookings and 20 workload rows returned per page.
+
+Booking selectors use searchable `/api/booking-options/{customers|staff|services}`
+pages of 20, retaining only the selected record when it is outside the page.
+Inactive records remain visible for historical edits; booking validation still
+rejects inactive choices for new bookings. Services accept any exact category
+filter, with current-page suggestions and an uncategorized option. Booking rows
+include display names and batched balances, avoiding per-row summary requests.
+Search is debounced 250 ms; replaced requests are aborted. Refresh and window
+focus reload the current page rather than all directories.
 Focus refresh is deferred while a customer, staff, service or appointment
 editor is mounted, preserving drafts and inline feedback when returning from a
 native confirmation dialog or another window. Closing the editor permits the next
@@ -216,7 +222,7 @@ refresh, persistence, network failure and mobile layout. The harness now verifie
 all nine public application tables and removes disposable schemas without
 disabling audit protection.
 
-The unit suite currently contains 98 tests, including payment, revenue and browser
+The unit suite currently contains 102 tests, including payment, revenue and browser
 readiness regressions. Readiness predicates are converted to booleans before CDP
 serialization; selectors use normal JavaScript quoting, and inherited disabled
 state is checked with `:disabled` rather than the input's own disabled property.
@@ -268,6 +274,8 @@ node tests/browser-auth.mjs --dashboard
 node tests/browser-auth.mjs --analytics
 node tests/browser-auth.mjs --payments
 node tests/browser-auth.mjs --audit
+node tests/browser-auth.mjs --mobile
+node tests/browser-auth.mjs --loading
 ```
 
 All test passwords and tokens stay in memory. Migration logs contain no connection
@@ -298,3 +306,15 @@ backend CORS grants only configured HTTPS origins and never browser credentials.
 The static frontend host must apply its own TLS, CSP, frame, referrer and cache
 policies: see [deployment security](../docs/production-security.md). Vite preview
 is not a production security-header or TLS server.
+
+## Performance and loading
+
+Screens and the booking editor load as separate chunks, preserving the navigation
+shell during loading. A failed chunk displays a safe recovery screen; reloading
+requires login again because tokens stay in memory. The shell clock updates once
+per minute; a targeted booking-start timer preserves timely appointment actions.
+Revenue is fetched only on Dashboard/Analytics. Focus refresh preserves editors,
+unsaved drafts and feedback. Existing balances remain visible during safe refresh.
+
+See [measured performance and limits](../docs/performance.md) for load results,
+pagination bounds, mobile coverage and reproducible disposable-data probes.

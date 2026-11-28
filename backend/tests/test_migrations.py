@@ -86,7 +86,7 @@ class MigrationTests(unittest.TestCase):
 
         actual = {index_sql(statement) for statement in self.statements if isinstance(statement, CreateIndex)}
         expected = {index_sql(CreateIndex(index)) for name, table in Base.metadata.tables.items()
-                    if name in self.tables for index in table.indexes}
+                    if name in self.tables for index in table.indexes if not str(index.name).endswith('_business_order')}
         self.assertEqual(actual, expected)
         self.assertEqual(len(actual), 9)
         self.assertTrue(any("lower(TRIM(BOTH FROM name))" in ddl and "WHERE active IS true" in ddl for ddl in actual))

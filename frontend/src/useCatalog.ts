@@ -1,9 +1,11 @@
+import { readWorkspace } from './workspace';
+import type {Query, Stats} from './workspace';
 import { bookingPayload, validateAppointment } from './appointments';
 import type { AppointmentDTO, AppointmentStatus } from './appointments';
 import type { Appointment, BookingInput } from './data';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
-import { checkRecord, customerFromAPI, customerToAPI, readCatalog, requiresDeactivationConfirmation, resourceError, serviceToAPI, staffToAPI } from './catalog';
+import { checkRecord, staffFromAPI, serviceFromAPI, customerFromAPI, customerToAPI, requiresDeactivationConfirmation, resourceError, serviceToAPI, staffToAPI } from './catalog';
 import type { Catalog, CustomerDTO, Resource, ServiceDTO, StaffDTO } from './catalog';
 import type { CustomerInput } from './customers';
 import { validateCustomer } from './customers';
@@ -12,17 +14,24 @@ import { validateStaff } from './staff';
 import type { ServiceInput } from './services';
 import { validateService } from './services';
 
-const empty = (): Catalog => ({ customers: [], staff: [], services: [], appointments: [] });
+const empty = () => ({ customers: [], staff: [], services: [], appointments: [], appointmentTotal:0,total:0,history:[],historyTotal:0,stats:null } as Catalog & {appointmentTotal:number;total:number;history:Appointment[];historyTotal:number;stats:Stats|null});
 
-export function useCatalog() {
+export function useCatalog(view: string) {
   const { api, session } = useAuth();
   const businessId = session!.business.id;
   const zone = session!.business.timezone;
   const owner = session!.user.role === 'owner';
-  const [data, setData] = useState<Catalog>(empty);
+  const [data, setData] = useState(empty);
+  const [selection,setSelection]=useState<{view:string;query:Query}>({view,query:{}});
+  const query=selection.view===view?selection.query:{};
+  const requestKey=JSON.stringify(query);
   const [loading, setLoading] = useState(true);
+  const [startedKey,setStartedKey]=useState('');
+  const [readyKey,setReadyKey]=useState('');
+  const targetKey=view+'|'+requestKey;
   const [ready, setReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadedView,setLoadedView]=useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -35,14 +44,18 @@ export function useCatalog() {
     refreshing.current = true;
     const request = ++version.current;
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    setLoading(true); setReady(false);
+    setStartedKey(targetKey);setLoading(true); setReady(false);
     try {
-      const next = await readCatalog(api, businessId, abort.signal, zone);
-      if (alive.current && request === version.current && !abort.signal.aborted) { setData(next); setReady(true); setLoaded(true); setError(''); }
+      if (JSON.parse(requestKey).q) await new Promise(resolve=>setTimeout(resolve,250));
+      if(abort.signal.aborted)return;
+      const next = await readWorkspace(api, businessId, view, JSON.parse(requestKey), abort.signal, zone);
+      const lastPage=Math.max(0,Math.ceil(next.total/20)-1);
+      if((query.page??0)>lastPage){setSelection({view,query:{...query,page:lastPage}});return;}
+      if (alive.current && request === version.current && !abort.signal.aborted) { setData(next);setReadyKey(targetKey); setReady(true); setLoaded(true);setLoadedView(view); setError(''); }
     } catch (reason) {
       if (alive.current && request === version.current && !abort.signal.aborted) { abort.abort(); setError(resourceError(reason)); }
     } finally { if (alive.current && request === version.current) { refreshing.current = false; setLoading(false); } }
-  }, [api, businessId, zone]);
+  }, [api, businessId, zone, view, requestKey]);
 
   useEffect(() => {
     alive.current = true; void refresh();
@@ -57,7 +70,7 @@ export function useCatalog() {
     return () => { alive.current = false; version.current++; controller.current?.abort(); refreshing.current = false; window.removeEventListener('focus', focus); };
   }, [refresh]);
 
-  async function write<T>(action: () => Promise<T>): Promise<T | string> {
+  async function write<T>(action: () => Promise<T>, nextQuery?:Query): Promise<T | string> {
     if (!alive.current || writing.current || refreshing.current || !ready || loading) return 'Please wait for the directory to finish loading.';
     writing.current = true; setBusy(true); setNotice('');
     try {
@@ -65,6 +78,7 @@ export function useCatalog() {
       if (!alive.current) return 'Your session has ended.';
       if (result === false) return result;
       setNotice('Saved to your business.');
+      if(nextQuery){setReady(false);setSelection({view,query:nextQuery});return result;}
       await refresh();
       return result;
     } catch (reason) { return resourceError(reason); }
@@ -103,12 +117,20 @@ export function useCatalog() {
   async function remove(resource: Resource, id: string) {
     if (resource !== 'customers' && !owner) return 'Only the business owner can delete staff or services.';
     if (!window.confirm('Permanently delete this record? Records referenced by appointments cannot be deleted.')) return null;
-    const result = await write(async () => { await api.request<void>(`/api/${resource}/${id}`, { method: 'DELETE' }); return true; });
+    const result = await write(async () => { await api.request<void>(`/api/${resource}/${id}`, { method: 'DELETE' }); return true; }, resource==='customers' && query.customer_id===id?{...query,customer_id:undefined,history_page:undefined}:undefined);
     return typeof result === 'string' ? result : null;
   }
   async function saveAppointment(input: BookingInput, original?: Appointment) {
     if (!ready || loading) return 'Wait for business records to finish loading.';
-    const validation = validateAppointment(input, data, zone, original); if (validation) return validation;
+    const records={...data};
+    try {
+      const [customer,member,service]=await Promise.all([
+        data.customers.find(x=>x.id===input.customerId)??api.request<CustomerDTO>('/api/customers/'+input.customerId).then(x=>customerFromAPI(checkRecord(x,businessId))),
+        data.staff.find(x=>x.id===input.staffId)??api.request<StaffDTO>('/api/staff/'+input.staffId).then(x=>staffFromAPI(checkRecord(x,businessId))),
+        data.services.find(x=>x.id===input.serviceId)??api.request<ServiceDTO>('/api/services/'+input.serviceId).then(x=>serviceFromAPI(checkRecord(x,businessId))),
+      ]);records.customers=[customer];records.staff=[member];records.services=[service];
+    }catch(reason){return resourceError(reason);}
+    const validation = validateAppointment(input, records, zone, original); if (validation) return validation;
     const body = bookingPayload(input, zone, original); if (body === null) return null;
     const result = await write(async () => {
       checkRecord(await api.request<AppointmentDTO>(`/api/appointments${original ? '/' + original.id : ''}`, { method: original ? 'PATCH' : 'POST', body }), businessId);
@@ -124,5 +146,7 @@ export function useCatalog() {
     });
     return typeof result === 'string' ? result : null;
   }
-  return { ...data, loading, ready, loaded, busy, error, notice, owner, refresh, saveCustomer, saveStaff, saveService, remove, saveAppointment, changeAppointment };
+  const updateQuery=(patch:Query)=>setSelection(old=>({view,query:Object.fromEntries(Object.entries({...old.view===view?old.query:{},...patch}).filter(([,value])=>value!==''&&value!==0&&value!==undefined).sort(([a],[b])=>a.localeCompare(b)))}));
+  const remote={total:data.total,page:query.page??0,pages:Math.max(1,Math.ceil(data.total/20)),setPage:(page:number)=>updateQuery({page}),filter:(patch:Query)=>updateQuery({...patch,page:0}),history:data.history,historyTotal:data.historyTotal,historyPage:query.history_page??0,selectCustomer:(id:string)=>{setData(old=>({...old,history:[],historyTotal:0}));updateQuery({customer_id:id,history_page:0});},setHistoryPage:(page:number)=>updateQuery({history_page:page})};
+  return { ...data, remote, loading:loading||startedKey!==targetKey, ready:ready&&readyKey===targetKey, loaded:loaded&&loadedView===view, busy, error, notice, owner, refresh, saveCustomer, saveStaff, saveService, remove, saveAppointment, changeAppointment };
 }
