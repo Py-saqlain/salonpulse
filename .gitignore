@@ -160,6 +160,7 @@ activemq-data/
 .env
 .envrc
 .vercel/
+.neon-setup/
 .pgpass
 pgpass.conf
 .pg_service.conf

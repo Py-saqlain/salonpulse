@@ -1,8 +1,65 @@
 # Vercel + Render + Neon deployment runbook
 
-Prepared 28 November 2026. This prepares source/configuration only: no hosting
-project, paid resource, hosted role, certificate or production migration has been
-provisioned or verified. Keep the existing local `backend/.env` unchanged.
+Prepared 28 November 2026. Task 5A prepared source/configuration; Task 5B has now
+verified the Neon database setup recorded below. Render and Vercel have not been
+deployed. Keep the existing local `backend/.env` unchanged.
+
+## Verified Neon setup (Task 5B)
+
+The selected existing Neon project was verified as PostgreSQL 17 in Singapore
+(`aws-ap-southeast-1`), with its existing default `production` branch. Neon CLI
+9.10.0 was installed globally and authenticated. No new project, compute upgrade,
+paid plan, Neon Auth, Data API, Functions, Storage or AI Gateway was provisioned.
+The reviewed PostgreSQL-only `neon deploy` plan was a no-op. It was applied with
+`--no-env-pull`; default `neondb` and the local PostgreSQL database were untouched.
+
+- Created the new dedicated `salonpulse_prod` database and ran the prepared SQL
+  bootstrap for `salonpulse_migrator` and `salonpulse_runtime`.
+- Initialized independent strong role passwords without password literals in
+  source, visible terminal output or command arguments. Neon's CLI cannot reset
+  a SQL-created role's password while it is initially empty; initialization used
+  server-generated random values over the verified TLS connection.
+- Applied all existing migrations with the guarded migration runner, starting
+  from the verified empty schema. Current head: `795150f8a1a2`; no schema drift.
+- Verified nine application tables, 32 checks, 17 foreign keys, nine uniqueness
+  constraints, 20 explicit indexes and the enabled immutable audit trigger.
+- Verified the actual runtime/migrator login flags, ownership and grants. Live
+  permission probes reject runtime DDL, receipt updates and audit deletions.
+- Passed 116 cloud checks through real runtime-role connections, including
+  two-tenant API workflows, authorization, snapshots, booking conflicts, partial/
+  full payments, idempotent retries, recovery intents, audit and reconciliation.
+  Request sessions used savepoints inside an outer rollback-only transaction;
+  all temporary records, including immutable audit rows, were rolled back.
+- Both real HTTP health endpoints passed against Neon in an ephemeral local
+  FastAPI process. All nine cloud application tables remain empty.
+- Frontend: 105 tests, TypeScript, deployment checks and production build passed
+  using the documented public HTTPS verification origin; no frontend deployment.
+
+Setup was isolated under the Git-ignored `.neon-setup/` directory because `init`
+can create configuration/dependencies and pull environment files. The private
+`cloud/` child directory has inheritance disabled and access limited to the
+normal Windows account. No cloud value was written to `backend/.env`, which was
+verified byte-for-byte unchanged. Only safe documentation/ignore changes belong
+in Git; do not commit the setup directory, account profiles or credentials.
+
+Private files for the next deployment step (open locally; never paste into chat):
+
+| Private path under `.neon-setup/cloud/` | Purpose |
+| --- | --- |
+| `.env.migration` | Windows operator's direct migration-role URL and target identity |
+| `.env.runtime` | Windows cloud-verification runtime URL and target identity |
+| `.env.runtime.render` | Runtime database values with Render's Linux CA path; still needs the other production settings |
+| `trusted-roots.pem` | Public CA roots exported from the Windows trust store for verified local TLS |
+
+Client TLS was verified with libpq's encrypted-socket state and `verify-full`.
+PostgreSQL-side `pg_stat_ssl` describes Neon's proxy-to-compute leg and is not
+proof of the application's client-to-proxy TLS. Do not weaken certificate or
+hostname verification to accommodate that distinction.
+
+The remaining sections describe fresh setup/release operations. **Do not rerun
+the empty-database bootstrap against this already-migrated database.** Configure
+Render/Vercel only in a separately authorized task, after real domains, ingress
+trust, production JWT settings, provider capacity and backup policy are reviewed.
 
 ## Release topology and account decisions
 
@@ -274,11 +331,12 @@ restart and do not protect multiple replicas; free-tier resource caps and sleepi
 services are not a production SLA. Local validation cannot certify managed TLS,
 provider IAM, actual proxy trust, real CA paths, backups or deployed browser behavior.
 
-Account access/user input still needed: provider projects/plans/region, real
-domains and DNS, verified Render ingress trust, independently generated secrets,
-Neon admin bootstrap/password setup, backup policy and protected migration runner.
+Remaining setup needs Render/Vercel account access, hosting plan/capacity review,
+real domains and DNS, verified Render ingress trust, production JWT configuration,
+backup policy and a protected migration operator. Neon bootstrap is complete as
+recorded above; do not repeat it on the migrated database.
 
-## Local verification for this change
+## Task 5A local verification (before Neon provisioning)
 
 - 247 backend tests and 105 frontend tests passed, including deployment target,
   role-policy, revision, redaction, secret-separation and CSP regression tests.
@@ -290,8 +348,8 @@ Neon admin bootstrap/password setup, backup policy and protected migration runne
 - All nine local application tables remain empty and no disposable schemas remain.
 - Source/build review found no new secrets; private `.env` is ignored/untracked.
 
-New hosted role policies and the migration operator were tested with mocks/guards;
-the SQL role scripts were reviewed but not applied to local or hosted databases.
-Actual Render/Vercel/Neon deployment validation and hosted browser checks require
-the account/domain/secret/proxy setup above. The Blueprint has not been submitted
-to a hosting account, and this report does not claim a live production deployment.
+At the Task 5A boundary, role policies and the migration operator had only been
+tested with mocks/guards; no role scripts had been applied. Task 5B subsequently
+verified Neon as recorded at the top of this document. Render/Vercel deployment,
+managed TLS/ingress and hosted browser checks remain pending. No Render Blueprint
+or Vercel deployment has been submitted to a hosting account.
