@@ -175,13 +175,19 @@ their independent logs. Do not enable SQL echo, HTTP body capture or Authorizati
 logging. Restrict access to secret files and process environments.
 
 Tenant filters, composite foreign keys and row-locking financial protections are
-unchanged and covered by the full database suite. Both owner and staff currently
-have payment and financial reporting permissions. Session-only payment keys,
-immutable operator audit trails, email verification, password reset, MFA, token
-revocation, provider reconciliation, load/penetration tests, patch management,
-monitoring and backup/restore drills remain deployment/product work. This task
-does not claim a live production TLS certificate, shared limiter or complete
-production-readiness certification.
+covered by the full database suite. Owners alone can browse receipt history,
+financial analytics and audit/reconciliation. Staff can record receipts and read
+necessary balances. Persistent server payment intents plus scoped browser UUID
+pointers recover uncertain outcomes across sessions without storing tokens or
+sensitive payment details. Immutable operator audit records commit atomically
+with sensitive writes.
+
+Email verification, password reset, MFA, token revocation, provider reconciliation,
+independent penetration testing, monitoring and backup/restore drills remain
+production work. Follow the [Vercel/Render/Neon deployment runbook](deployment.md)
+for restricted database roles, separate migrations, TLS/proxy release gates and
+hosting limitations. Local checks do not certify hosted infrastructure.
+
 
 
 ## Verification scheduling

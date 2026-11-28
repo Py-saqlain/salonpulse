@@ -222,7 +222,7 @@ refresh, persistence, network failure and mobile layout. The harness now verifie
 all nine public application tables and removes disposable schemas without
 disabling audit protection.
 
-The unit suite currently contains 102 tests, including payment, revenue and browser
+The unit suite currently contains 105 tests, including payment, revenue and browser
 readiness regressions. Readiness predicates are converted to booleans before CDP
 serialization; selectors use normal JavaScript quoting, and inherited disabled
 state is checked with `:disabled` rather than the input's own disabled property.
@@ -318,3 +318,12 @@ unsaved drafts and feedback. Existing balances remain visible during safe refres
 
 See [measured performance and limits](../docs/performance.md) for load results,
 pagination bounds, mobile coverage and reproducible disposable-data probes.
+
+## Vercel deployment
+
+Set Root Directory to `frontend` and Node 24.x. `vercel.json` uses `npm ci`, the
+production build guard and deployment-policy checks, and serves `dist` with
+security/cache headers. Set the public `VITE_API_BASE_URL` and match its exact
+origin in CSP `connect-src`; mismatches fail the hosting build. No backend secrets
+belong in Vercel environment variables. See [the deployment runbook](../docs/deployment.md)
+for exact hosting setup, previews, CORS, DNS and release checks.

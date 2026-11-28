@@ -1,0 +1,31 @@
+{
+  "services": [{
+    "type": "web",
+    "name": "salonpulse-api",
+    "runtime": "python",
+    "rootDir": "backend",
+    "plan": "free",
+    "numInstances": 1,
+    "autoDeployTrigger": "off",
+    "buildCommand": "python -m pip install -r requirements.txt && python -m pip check",
+    "startCommand": "python -m app.deployment check-runtime && python -m app.serve --host 0.0.0.0 --port $PORT",
+    "envVars": [
+      {"key": "PYTHON_VERSION", "value": "3.13.17"},
+      {"key": "PYTHONDONTWRITEBYTECODE", "value": "1"},
+      {"key": "APP_ENV", "value": "production"},
+      {"key": "DEBUG", "value": "false"},
+      {"key": "HTTPS_ONLY", "value": "true"},
+      {"key": "DOCS_ENABLED", "value": "false"},
+      {"key": "ACCESS_TOKEN_EXPIRE_MINUTES", "value": "30"},
+      {"key": "JWT_AUDIENCE", "value": "salonpulse-web"},
+      {"key": "DATABASE_URL", "sync": false},
+      {"key": "JWT_SECRET_KEY", "sync": false},
+      {"key": "JWT_ISSUER", "sync": false},
+      {"key": "CORS_ORIGINS", "sync": false},
+      {"key": "TRUSTED_HOSTS", "sync": false},
+      {"key": "TRUSTED_PROXIES", "sync": false},
+      {"key": "DEPLOY_DATABASE_HOST", "sync": false},
+      {"key": "DEPLOY_DATABASE_NAME", "value": "salonpulse_prod"}
+    ]
+  }]
+}

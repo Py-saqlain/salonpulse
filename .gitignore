@@ -159,6 +159,10 @@ activemq-data/
 # Environments
 .env
 .envrc
+.vercel/
+.pgpass
+pgpass.conf
+.pg_service.conf
 .venv
 env/
 venv/

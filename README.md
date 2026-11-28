@@ -10,6 +10,7 @@ revenue reporting. Tokens remain in memory; refreshing requires login again.
 
 - [Frontend setup and browser verification](frontend/README.md)
 - [Backend configuration, API contracts and migrations](backend/README.md)
+- [Vercel, Render and Neon deployment](docs/deployment.md)
 - [Performance, mobile coverage and load testing](docs/performance.md)
 - API entry point: `backend/app/main.py`; interactive docs: `/docs`.
 - Private `.env`, virtual environments, caches, dependencies and build output are

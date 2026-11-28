@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import settings
 from app.db.base import Base
 import app.models  # noqa: F401 -- register all ORM tables before autogeneration
 
@@ -27,6 +26,8 @@ comparison_options = {
 
 
 def database_url():
+    # Supplied migration connections do not need runtime JWT/application secrets.
+    from app.core.config import settings
     if settings.database_url is None:
         raise CommandError("Configure DATABASE_URL privately in backend/.env.")
     try:

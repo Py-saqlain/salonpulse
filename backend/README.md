@@ -716,3 +716,13 @@ must fit the PostgreSQL connection budget.
 
 See [performance measurements](../docs/performance.md) for reproducible isolated
 load tests, measured tradeoffs and deployment limitations.
+
+## Hosted deployment preparation
+
+See [the Vercel/Render/Neon runbook](../docs/deployment.md). The Render Blueprint
+runs the secure launcher after a read-only role/schema preflight. Production uses
+Neon's direct endpoint with the existing bounded SQLAlchemy pool. Restricted
+runtime permissions exclude DDL and changes/deletes to payments/audit records.
+Migration credentials remain in a separate operator environment; the explicit
+migration runner validates the exact target and expected revision before writes.
+The runtime never executes migrations. Local `.env` and database are unchanged.
